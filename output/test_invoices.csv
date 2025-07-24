@@ -1,0 +1,2 @@
+﻿email_subject,vendor,invoice_number,amount,currency,due_date,invoice_date,ocr,description,email_sender,email_date,confidence,processed_date,email_id
+Test Faktura från Vattenfall,Vattenfall,INV-2024-001,1250.50,SEK,2024-08-15,2024-07-15,12345678901234567890,Electricity bill,noreply@vattenfall.se,2024-07-20 10:30:00,0.95,2025-07-24 15:39:21,test_001
