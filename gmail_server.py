@@ -67,8 +67,10 @@ class GmailServer:
             start_date = end_date - timedelta(days=days_back)
 
             # Gmail search query for potential invoices
-            query = f'after:{start_date.strftime("%Y/%m/%d")} (subject:madinter OR subject:räkning OR subject:invoice OR subject:bill OR has:attachment filetype:pdf)'
-
+            query = f'after:{start_date.strftime("%Y/%m/%d")} (subject:madinter OR räkning OR invoice OR bill OR has:attachment filename:pdf)'
+            logger.info(
+                f"Fetching emails with query: {query} (max {max_emails} emails)"
+            )
             logger.info(
                 f"Searching emails from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}"
             )
