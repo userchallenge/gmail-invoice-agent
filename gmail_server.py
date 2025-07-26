@@ -15,10 +15,11 @@ logger = logging.getLogger(__name__)
 
 
 class GmailServer:
-    def __init__(self, credentials_file: str, token_file: str, scopes: List[str]):
+    def __init__(self, credentials_file: str, token_file: str, scopes: List[str], config: Dict = None):
         self.credentials_file = credentials_file
         self.token_file = token_file
         self.scopes = scopes
+        self.config = config or {}
         self.service = None
         self._authenticate()
 
@@ -59,6 +60,44 @@ class GmailServer:
         self.service = build("gmail", "v1", credentials=creds)
         logger.info("Gmail authentication successful")
 
+    def _build_search_query(self, start_date: datetime) -> str:
+        """Build Gmail search query dynamically from config keywords"""
+        date_filter = f'after:{start_date.strftime("%Y/%m/%d")}'
+        
+        # Build keyword searches for both subject and body
+        keyword_filters = []
+        
+        # Add invoice indicator keywords (Swedish and English)
+        if self.config.get('invoice_keywords', {}).get('invoice_indicators'):
+            swedish_indicators = self.config['invoice_keywords']['invoice_indicators'].get('swedish', [])
+            english_indicators = self.config['invoice_keywords']['invoice_indicators'].get('english', [])
+            
+            for keyword in swedish_indicators + english_indicators:
+                # Search both subject and body for each keyword
+                keyword_filters.append(f'(subject:{keyword} OR {keyword})')
+        
+        # Add common vendor keywords
+        if self.config.get('common_vendors'):
+            swedish_vendors = self.config['common_vendors'].get('swedish', [])
+            english_vendors = self.config['common_vendors'].get('english', [])
+            
+            for vendor in swedish_vendors + english_vendors:
+                # Search for vendor in sender field and body content
+                keyword_filters.append(f'(from:{vendor} OR {vendor})')
+        
+        # Add PDF attachment filter (common for invoices)
+        attachment_filter = "has:attachment filename:pdf"
+        
+        # Combine all filters
+        if keyword_filters:
+            keywords_query = " OR ".join(keyword_filters)
+            full_query = f'{date_filter} ({keywords_query} OR {attachment_filter})'
+        else:
+            # Fallback to basic query if no config keywords
+            full_query = f'{date_filter} (invoice OR faktura OR räkning OR bill OR {attachment_filter})'
+        
+        return full_query
+
     def fetch_emails(self, days_back: int = 30, max_emails: int = 100) -> List[Dict]:
         """Fetch emails from the last N days"""
         try:
@@ -66,8 +105,8 @@ class GmailServer:
             end_date = datetime.now()
             start_date = end_date - timedelta(days=days_back)
 
-            # Gmail search query for potential invoices
-            query = f'after:{start_date.strftime("%Y/%m/%d")} (subject:madinter OR räkning OR invoice OR bill OR has:attachment filename:pdf)'
+            # Build Gmail search query dynamically from config
+            query = self._build_search_query(start_date)
             logger.info(
                 f"Fetching emails with query: {query} (max {max_emails} emails)"
             )

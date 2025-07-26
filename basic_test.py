@@ -9,6 +9,7 @@ import sys
 import yaml
 import logging
 from datetime import datetime
+from dotenv import load_dotenv
 
 # Import our modules
 from gmail_server import GmailServer
@@ -28,9 +29,9 @@ def test_config_loading():
         for section in required_sections:
             assert section in config, f"Missing config section: {section}"
         
-        # Check Claude API key is set
-        claude_key = config['claude']['api_key']
-        assert claude_key != 'your-claude-api-key-here', "Claude API key not configured"
+        # Check Claude API key is set in environment
+        claude_key = os.getenv('CLAUDE_API_KEY')
+        assert claude_key is not None, "CLAUDE_API_KEY environment variable not set"
         
         print("✅ Configuration loading: PASSED")
         return config
@@ -106,7 +107,7 @@ def test_email_classifier_init(config):
     
     try:
         classifier = EmailClassifier(
-            api_key=config['claude']['api_key'],
+            api_key=os.getenv('CLAUDE_API_KEY'),
             config=config
         )
         
@@ -150,7 +151,7 @@ def test_dummy_email_processing(config):
         }
         
         classifier = EmailClassifier(
-            api_key=config['claude']['api_key'],
+            api_key=os.getenv('CLAUDE_API_KEY'),
             config=config
         )
         
@@ -172,6 +173,9 @@ def test_dummy_email_processing(config):
 
 def main():
     """Run all basic tests"""
+    # Load environment variables from .env file
+    load_dotenv()
+    
     print("=" * 60)
     print("🧪 Gmail Invoice Agent - Basic Functionality Tests")
     print("=" * 60)

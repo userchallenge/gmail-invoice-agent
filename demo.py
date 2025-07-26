@@ -11,6 +11,7 @@ import os
 import sys
 from datetime import datetime
 from tqdm import tqdm
+from dotenv import load_dotenv
 
 # Import our modules
 from gmail_server import GmailServer
@@ -55,10 +56,10 @@ def load_config(config_path: str) -> dict:
 
 def validate_credentials(config: dict):
     """Validate that required credentials are available"""
-    # Check Claude API key
-    claude_key = config["claude"]["api_key"]
-    if not claude_key or claude_key == "your-claude-api-key-here":
-        print("❌ Please set your Claude API key in config/config.yaml")
+    # Check Claude API key from environment variable
+    claude_key = os.getenv("CLAUDE_API_KEY")
+    if not claude_key:
+        print("❌ Please set CLAUDE_API_KEY in your .env file")
         sys.exit(1)
 
     # Check Gmail credentials file
@@ -134,6 +135,9 @@ def print_results(invoice_data: list, stats: dict):
 
 def main():
     """Main application entry point"""
+    # Load environment variables from .env file
+    load_dotenv()
+    
     parser = argparse.ArgumentParser(
         description="Extract invoice data from Gmail using AI",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -199,10 +203,11 @@ Examples:
             credentials_file=config["gmail"]["credentials_file"],
             token_file=config["gmail"]["token_file"],
             scopes=config["gmail"]["scopes"],
+            config=config,
         )
 
         print("🧠 Initializing Claude AI classifier...")
-        classifier = EmailClassifier(api_key=config["claude"]["api_key"], config=config)
+        classifier = EmailClassifier(api_key=os.getenv("CLAUDE_API_KEY"), config=config)
 
         print("📁 Setting up CSV exporter...")
         exporter = CSVExporter(config["output"]["invoices_file"])

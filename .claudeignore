@@ -1,0 +1,6 @@
+.env
+*.env
+.env.*
+config/secrets.yaml
+**/credentials.json
+**/*_token.json

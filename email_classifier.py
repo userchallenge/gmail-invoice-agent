@@ -64,14 +64,18 @@ class EmailClassifier:
     def _extract_with_claude(self, email: Dict) -> Optional[Dict]:
         """Use Claude to extract invoice data"""
         try:
-            # Prepare context for Claude
+            # Clean and prepare context for Claude (handle encoding issues)
+            subject = self._clean_text(email.get('subject', ''))
+            sender = self._clean_text(email.get('sender', ''))
+            body = self._clean_text(email.get('body', ''))[:2000]  # Limit body length
+            
             email_content = f"""
-Subject: {email['subject']}
-From: {email['sender']}
-Date: {email['date']}
-Body: {email['body'][:2000]}  # Limit body length
+Subject: {subject}
+From: {sender}
+Date: {email.get('date', '')}
+Body: {body}
 
-Attachments: {[att['filename'] for att in email.get('attachments', [])]}
+Attachments: {[self._clean_text(att.get('filename', '')) for att in email.get('attachments', [])]}
 """
             
             prompt = f"""You are an expert at identifying and extracting data from Swedish and English invoices in emails.
@@ -120,10 +124,16 @@ Respond with ONLY a JSON object like this:
 
 If not an invoice, respond with: {{"is_invoice": false}}"""
 
+            # Clean the entire prompt to avoid encoding issues
+            cleaned_prompt = self._clean_text(prompt)
+            
+            # Debug: log the cleaned prompt to check for encoding issues
+            logger.debug(f"Sending prompt to Claude (first 200 chars): {cleaned_prompt[:200]!r}")
+
             message = self.client.messages.create(
                 model=self.config['claude']['model'],
                 max_tokens=1000,
-                messages=[{"role": "user", "content": prompt}]
+                messages=[{"role": "user", "content": cleaned_prompt}]
             )
             
             response_text = message.content[0].text.strip()
@@ -136,6 +146,22 @@ If not an invoice, respond with: {{"is_invoice": false}}"""
                     json_text = json_text.split("```json")[1].split("```")[0]
                 elif "```" in json_text:
                     json_text = json_text.split("```")[1].split("```")[0]
+                
+                # Try to extract just the JSON part if there's extra text
+                if "{" in json_text and "}" in json_text:
+                    start = json_text.find("{")
+                    # Find the closing brace by counting braces
+                    brace_count = 0
+                    end = start
+                    for i, char in enumerate(json_text[start:], start):
+                        if char == "{":
+                            brace_count += 1
+                        elif char == "}":
+                            brace_count -= 1
+                            if brace_count == 0:
+                                end = i + 1
+                                break
+                    json_text = json_text[start:end]
                 
                 invoice_data = json.loads(json_text)
                 return invoice_data
@@ -230,3 +256,41 @@ If not an invoice, respond with: {{"is_invoice": false}}"""
         
         logger.warning(f"Could not parse date: {date_str}")
         return date_str
+    
+    def _clean_text(self, text: str) -> str:
+        """Clean text to handle encoding issues and special characters"""
+        if not text:
+            return ""
+        
+        # Convert to string if not already
+        text = str(text)
+        
+        # Replace or remove problematic characters
+        # Replace common problematic characters
+        replacements = {
+            '\xb4': "'",  # Acute accent
+            '\u2019': "'",  # Right single quotation mark
+            '\u2018': "'",  # Left single quotation mark
+            '\u201c': '"',  # Left double quotation mark
+            '\u201d': '"',  # Right double quotation mark
+            '\u2013': '-',  # En dash
+            '\u2014': '-',  # Em dash
+            '\u00a0': ' ',  # Non-breaking space
+        }
+        
+        for old_char, new_char in replacements.items():
+            text = text.replace(old_char, new_char)
+        
+        # Remove any remaining non-printable characters
+        text = ''.join(char for char in text if char.isprintable() or char.isspace())
+        
+        # Ensure we can encode to UTF-8
+        try:
+            text.encode('utf-8')
+            return text
+        except UnicodeEncodeError:
+            # If still problematic, replace non-ASCII with safe alternatives
+            return text.encode('ascii', errors='replace').decode('ascii')
+        except Exception:
+            # Last resort: return empty string
+            return ""
