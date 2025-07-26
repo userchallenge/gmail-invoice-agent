@@ -148,6 +148,7 @@ If not an invoice, respond with: {{"is_invoice": false}}"""
                     json_text = json_text.split("```")[1].split("```")[0]
                 
                 # Try to extract just the JSON part if there's extra text
+                original_response = json_text
                 if "{" in json_text and "}" in json_text:
                     start = json_text.find("{")
                     # Find the closing brace by counting braces
@@ -164,6 +165,13 @@ If not an invoice, respond with: {{"is_invoice": false}}"""
                     json_text = json_text[start:end]
                 
                 invoice_data = json.loads(json_text)
+                
+                # Log Claude's reasoning if there was extra text beyond JSON
+                if len(original_response.strip()) > len(json_text.strip()):
+                    reasoning = original_response[len(json_text):].strip()
+                    if reasoning:
+                        logger.info(f"Claude's reasoning: {reasoning}")
+                
                 return invoice_data
                 
             except json.JSONDecodeError as e:
