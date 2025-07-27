@@ -1,7 +1,7 @@
 import anthropic
 import logging
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional
 from datetime import datetime
 import json
 
@@ -69,6 +69,20 @@ class EmailClassifier:
             sender = self._clean_text(email.get('sender', ''))
             body = self._clean_text(email.get('body', ''))[:2000]  # Limit body length
             
+            # Include PDF content if available
+            pdf_content = ""
+            if email.get('pdf_processed') and email.get('pdf_text'):
+                pdf_text = self._clean_text(email.get('pdf_text', ''))[:3000]  # Limit PDF text length
+                pdf_filename = email.get('pdf_filename', 'unknown.pdf')
+                pdf_content = f"""
+
+--- PDF ATTACHMENT CONTENT ---
+PDF File: {pdf_filename}
+PDF Text:
+{pdf_text}
+--- END PDF CONTENT ---
+"""
+            
             email_content = f"""
 Subject: {subject}
 From: {sender}
@@ -76,11 +90,12 @@ Date: {email.get('date', '')}
 Body: {body}
 
 Attachments: {[self._clean_text(att.get('filename', '')) for att in email.get('attachments', [])]}
+{pdf_content}
 """
             
-            prompt = f"""You are an expert at identifying and extracting data from Swedish and English invoices in emails.
+            prompt = f"""You are an expert at identifying and extracting data from Swedish and English invoices in emails and PDF attachments.
 
-Analyze this email and determine:
+Analyze this email (including any PDF attachment content) and determine:
 1. Is this a legitimate invoice/bill (not promotional, not receipt, not notification)?
 2. If yes, extract the following information:
 
@@ -96,6 +111,9 @@ Extract this information if it's an invoice:
 - invoice_date: Invoice date (YYYY-MM-DD format)
 - ocr: OCR number (Swedish format, typically 16-20 digits)
 - description: Brief description of what this is for
+
+IMPORTANT: If PDF attachment content is provided (marked with "--- PDF ATTACHMENT CONTENT ---"), 
+prioritize the PDF content over email text as PDFs often contain the actual invoice details.
 
 Swedish Invoice Patterns to Look For:
 - OCR numbers: Long numeric strings (16-20 digits)
@@ -136,7 +154,12 @@ If not an invoice, respond with: {{"is_invoice": false}}"""
                 messages=[{"role": "user", "content": cleaned_prompt}]
             )
             
-            response_text = message.content[0].text.strip()
+            # Extract text from Claude's response
+            try:
+                response_text = message.content[0].text.strip()
+            except AttributeError:
+                # Fallback for different content types
+                response_text = str(message.content[0]).strip()
             
             # Parse JSON response
             try:
@@ -190,16 +213,21 @@ If not an invoice, respond with: {{"is_invoice": false}}"""
             'email_subject': email['subject'],
             'email_sender': email['sender'],
             'email_date': email['date'],
-            'vendor': claude_data.get('vendor', '').strip(),
-            'invoice_number': claude_data.get('invoice_number', '').strip(),
+            'vendor': (claude_data.get('vendor') or '').strip(),
+            'invoice_number': (claude_data.get('invoice_number') or '').strip(),
             'amount': self._clean_amount(claude_data.get('amount', '')),
             'currency': claude_data.get('currency', 'SEK').upper(),
             'due_date': self._clean_date(claude_data.get('due_date', '')),
             'invoice_date': self._clean_date(claude_data.get('invoice_date', '')),
-            'ocr': claude_data.get('ocr', '').strip(),
-            'description': claude_data.get('description', '').strip(),
+            'ocr': (claude_data.get('ocr') or '').strip(),
+            'description': (claude_data.get('description') or '').strip(),
             'confidence': claude_data.get('confidence', 0.0),
-            'processed_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            'processed_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            # PDF processing metadata
+            'pdf_processed': email.get('pdf_processed', False),
+            'pdf_filename': email.get('pdf_filename', ''),
+            'pdf_text_length': email.get('pdf_text_length', 0),
+            'pdf_processing_error': email.get('pdf_processing_error', '')
         }
     
     def _clean_amount(self, amount_str: str) -> str:

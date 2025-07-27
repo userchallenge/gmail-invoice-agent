@@ -1,19 +1,23 @@
 import pandas as pd
 import os
 import logging
+import csv
 from typing import List, Dict
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
 class CSVExporter:
-    def __init__(self, output_file: str):
+    def __init__(self, output_file: str = None):
         self.output_file = output_file
-        self.ensure_output_directory()
+        if output_file:
+            self.ensure_output_directory()
     
-    def ensure_output_directory(self):
+    def ensure_output_directory(self, output_file: str = None):
         """Create output directory if it doesn't exist"""
-        os.makedirs(os.path.dirname(self.output_file), exist_ok=True)
+        file_path = output_file or self.output_file
+        if file_path:
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
     
     def export_invoices(self, invoice_data: List[Dict]) -> bool:
         """Export invoice data to CSV"""
@@ -37,7 +41,12 @@ class CSVExporter:
                 'email_date',
                 'confidence',
                 'processed_date',
-                'email_id'
+                'email_id',
+                # PDF processing metadata
+                'pdf_processed',
+                'pdf_filename',
+                'pdf_text_length',
+                'pdf_processing_error'
             ]
             
             df = pd.DataFrame(invoice_data)
@@ -151,3 +160,35 @@ class CSVExporter:
         except Exception as e:
             logger.error(f"Error generating summary stats: {e}")
             return {}
+    
+    def export_extractor_data(self, extractor_name: str, data_items: List[Dict], output_file: str):
+        """Generic CSV export for any extractor data"""
+        if not data_items:
+            logger.info(f"No {extractor_name} data to export")
+            return
+            
+        # Ensure output directory exists
+        self.ensure_output_directory(output_file)
+        
+        # Get all unique keys across all items for CSV headers
+        all_keys = set()
+        for item in data_items:
+            all_keys.update(item.keys())
+        
+        headers = sorted(list(all_keys))
+        
+        try:
+            with open(output_file, 'w', newline='', encoding='utf-8-sig') as csvfile:
+                writer = csv.DictWriter(csvfile, fieldnames=headers)
+                writer.writeheader()
+                
+                for item in data_items:
+                    # Ensure all fields are present, fill with empty string if missing
+                    row = {key: item.get(key, '') for key in headers}
+                    writer.writerow(row)
+            
+            logger.info(f"✓ Exported {len(data_items)} {extractor_name} items to {output_file}")
+            
+        except Exception as e:
+            logger.error(f"Error exporting {extractor_name} data to CSV: {e}")
+            raise

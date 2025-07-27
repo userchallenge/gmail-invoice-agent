@@ -1,27 +1,15 @@
-#!/usr/bin/env python3
-"""
-Gmail Invoice Agent - Demo Script
-Extracts invoice data from Gmail and exports to CSV
-"""
-
 import argparse
 import yaml
-import logging
 import os
-import sys
-from datetime import datetime
-from tqdm import tqdm
+import logging
 from dotenv import load_dotenv
-
-# Import our modules
+from agents.email_processor import EmailProcessor
 from gmail_server import GmailServer
-from email_classifier import EmailClassifier
 from csv_exporter import CSVExporter
 
-from typing import Optional
+logger = logging.getLogger(__name__)
 
-
-def setup_logging(log_file: Optional[str] = None):
+def setup_logging(log_file: str = None):
     """Setup logging configuration"""
     log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
@@ -30,235 +18,235 @@ def setup_logging(log_file: Optional[str] = None):
         logging.basicConfig(
             level=logging.INFO,
             format=log_format,
-            handlers=[logging.FileHandler(log_file), logging.StreamHandler(sys.stdout)],
+            handlers=[logging.FileHandler(log_file), logging.StreamHandler()]
         )
     else:
         logging.basicConfig(level=logging.INFO, format=log_format)
 
-
-def load_config(config_path: str) -> dict:
-    """Load configuration from YAML file"""
-    try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            config = yaml.safe_load(f)
-
-        # Validate required keys
-        required_keys = ["claude", "gmail", "processing", "output"]
-        for key in required_keys:
-            if key not in config:
-                raise ValueError(f"Missing required config section: {key}")
-
-        return config
-    except Exception as e:
-        print(f"❌ Error loading config from {config_path}: {e}")
-        sys.exit(1)
-
-
-def validate_credentials(config: dict):
-    """Validate that required credentials are available"""
-    # Check Claude API key from environment variable
-    claude_key = os.getenv("CLAUDE_API_KEY")
-    if not claude_key:
-        print("❌ Please set CLAUDE_API_KEY in your .env file")
-        sys.exit(1)
-
-    # Check Gmail credentials file
-    gmail_creds = config["gmail"]["credentials_file"]
-    if not os.path.exists(gmail_creds):
-        print(f"❌ Gmail credentials file not found: {gmail_creds}")
-        print(
-            "Please download credentials.json from Google Cloud Console and place it at this location"
-        )
-        sys.exit(1)
-
-
-def print_banner():
-    """Print application banner"""
-    print("=" * 60)
-    print("📧 Gmail Invoice Agent - AI-Powered Invoice Extraction")
-    print("=" * 60)
-    print()
-
-
-def process_emails(
-    gmail_server: GmailServer, classifier: EmailClassifier, config: dict
-) -> list:
-    """Process emails and extract invoice data"""
-    print("🔍 Fetching emails from Gmail...")
-
-    emails = gmail_server.fetch_emails(
-        days_back=config["processing"]["default_days_back"],
-        max_emails=config["processing"]["max_emails"],
-    )
-
-    if not emails:
-        print("❌ No emails found or error fetching emails")
-        return []
-
-    print(f"📧 Found {len(emails)} potential invoice emails")
-    print("\n🤖 Processing emails with Claude AI...")
-
-    invoice_data = []
-
-    # Process emails with progress bar
-    for email in tqdm(emails, desc="Processing emails"):
-        try:
-            extracted_data = classifier.classify_and_extract(email)
-            if extracted_data:
-                invoice_data.append(extracted_data)
-        except Exception as e:
-            logging.error(
-                f"Error processing email {email.get('subject', 'Unknown')}: {e}"
-            )
-            continue
-
-    return invoice_data
-
-
-def print_results(invoice_data: list, stats: dict):
-    """Print processing results"""
-    print(f"\n✅ Processing Complete!")
-    print(f"📊 Results Summary:")
-    print(f"   • Total invoices found: {len(invoice_data)}")
-
-    if stats:
-        print(f"   • Total amount: {stats.get('total_amount', 0):.2f} SEK")
-        print(f"   • Average amount: {stats.get('avg_amount', 0):.2f} SEK")
-
-        if "top_vendors" in stats:
-            print(
-                f"   • Top vendors: {', '.join(list(stats['top_vendors'].keys())[:3])}"
-            )
-
-    print()
-
-
 def main():
-    """Main application entry point"""
-    # Load environment variables from .env file
+    # Load environment variables
     load_dotenv()
     
-    parser = argparse.ArgumentParser(
-        description="Extract invoice data from Gmail using AI",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  python demo.py                           # Use default config
-  python demo.py --config my_config.yaml  # Use custom config
-  python demo.py --days-back 7            # Process last 7 days only
-        """,
-    )
-
-    parser.add_argument(
-        "--config",
-        default="config/config.yaml",
-        help="Configuration file path (default: config/config.yaml)",
-    )
-
-    parser.add_argument(
-        "--days-back", type=int, help="Number of days back to search (overrides config)"
-    )
-
-    parser.add_argument(
-        "--max-emails",
-        type=int,
-        help="Maximum number of emails to process (overrides config)",
-    )
-
-    parser.add_argument(
-        "--verbose", "-v", action="store_true", help="Enable verbose logging"
-    )
-
+    parser = argparse.ArgumentParser(description='Gmail Multi-Purpose Email Extractor')
+    parser.add_argument('--config', default='config/config.yaml', help='Config file path')
+    parser.add_argument('--dummy-data', action='store_true', help='Use test data instead of Gmail API')
+    parser.add_argument('--extractors', nargs='+', help='Specific extractors to run (invoices, concerts)', default=None)
+    parser.add_argument('--days-back', type=int, help='Number of days back to search', default=None)
     args = parser.parse_args()
-
-    # Print banner
-    print_banner()
-
+    
     # Load configuration
-    print(f"📄 Loading configuration from {args.config}...")
-    config = load_config(args.config)
-
-    # Override config with command line args
+    try:
+        with open(args.config, 'r') as f:
+            config = yaml.safe_load(f)
+    except FileNotFoundError:
+        logger.error(f"Config file not found: {args.config}")
+        return 1
+    except Exception as e:
+        logger.error(f"Error loading config: {e}")
+        return 1
+    
+    # Get Claude API key from environment
+    claude_api_key = os.getenv('CLAUDE_API_KEY')
+    if not claude_api_key:
+        logger.error("CLAUDE_API_KEY not found in environment variables")
+        logger.error("Please create a .env file with: CLAUDE_API_KEY=your_api_key_here")
+        return 1
+    
+    # Override extractor selection if specified
+    if args.extractors:
+        logger.info(f"Running only specified extractors: {args.extractors}")
+        extractors_config = config.get('extractors', {})
+        # Disable all extractors first
+        for name in extractors_config:
+            extractors_config[name]['enabled'] = False
+        # Enable only specified ones
+        for name in args.extractors:
+            if name in extractors_config:
+                extractors_config[name]['enabled'] = True
+            else:
+                logger.warning(f"Unknown extractor '{name}' - available: {list(extractors_config.keys())}")
+    
+    # Override days back if specified
     if args.days_back:
-        config["processing"]["default_days_back"] = args.days_back
-    if args.max_emails:
-        config["processing"]["max_emails"] = args.max_emails
-
+        config['processing']['default_days_back'] = args.days_back
+        logger.info(f"Using custom days back: {args.days_back}")
+    
     # Setup logging
-    log_level = logging.DEBUG if args.verbose else logging.INFO
-    logging.getLogger().setLevel(log_level)
-
     if "log_file" in config["output"]:
         setup_logging(config["output"]["log_file"])
     else:
         setup_logging()
-
-    # Validate credentials
-    validate_credentials(config)
-
+    
+    # Initialize components
     try:
-        # Initialize components
-        print("🔐 Authenticating with Gmail...")
+        email_processor = EmailProcessor(config, claude_api_key)
         gmail_server = GmailServer(
-            credentials_file=config["gmail"]["credentials_file"],
-            token_file=config["gmail"]["token_file"],
-            scopes=config["gmail"]["scopes"],
-            config=config,
+            config['gmail']['credentials_file'],
+            config['gmail']['token_file'],
+            config['gmail']['scopes'],
+            config
         )
-
-        print("🧠 Initializing Claude AI classifier...")
-        classifier = EmailClassifier(api_key=os.getenv("CLAUDE_API_KEY"), config=config)
-
-        print("📁 Setting up CSV exporter...")
-        exporter = CSVExporter(config["output"]["invoices_file"])
-
-        # Process emails
-        invoice_data = process_emails(gmail_server, classifier, config)
-
-        if invoice_data:
-            # Export to CSV
-            print(f"💾 Exporting {len(invoice_data)} invoices to CSV...")
-            success = exporter.append_invoices(invoice_data)
-
-            if success:
-                # Get and display stats
-                stats = exporter.get_summary_stats()
-                print_results(invoice_data, stats)
-
-                print(
-                    f"📄 Invoice data exported to: {config['output']['invoices_file']}"
-                )
-
-                # Show sample data
-                if len(invoice_data) > 0:
-                    print("\n📋 Sample extracted invoice:")
-                    sample = invoice_data[0]
-                    print(f"   • Vendor: {sample.get('vendor', 'N/A')}")
-                    print(
-                        f"   • Amount: {sample.get('amount', 'N/A')} {sample.get('currency', 'SEK')}"
-                    )
-                    print(f"   • Due Date: {sample.get('due_date', 'N/A')}")
-                    print(f"   • Invoice #: {sample.get('invoice_number', 'N/A')}")
-                    if sample.get("ocr"):
-                        print(f"   • OCR: {sample.get('ocr')}")
-            else:
-                print("❌ Failed to export invoice data")
-                sys.exit(1)
-        else:
-            print("📭 No invoices found in the processed emails")
-            print("This could mean:")
-            print("   • No invoice emails in the date range")
-            print("   • Invoices not recognized by AI classifier")
-            print("   • All found invoices were already processed")
-
-    except KeyboardInterrupt:
-        print("\n\n⏹️  Processing interrupted by user")
-        sys.exit(0)
+        csv_exporter = CSVExporter()
     except Exception as e:
-        logging.error(f"Application error: {e}")
-        print(f"\n❌ Error: {e}")
-        sys.exit(1)
+        logger.error(f"Error initializing components: {e}")
+        return 1
+    
+    logger.info("=== Gmail Multi-Purpose Email Extractor ===")
+    enabled_extractors = email_processor.get_enabled_extractors()
+    if not enabled_extractors:
+        logger.error("No extractors enabled! Check your config.yaml")
+        return 1
+    logger.info(f"Enabled extractors: {', '.join(enabled_extractors)}")
+    
+    try:
+        if args.dummy_data:
+            logger.info("Using dummy data for testing...")
+            return run_dummy_data_test(email_processor, csv_exporter, config)
+        else:
+            return run_gmail_extraction(email_processor, gmail_server, csv_exporter, config)
+                
+    except Exception as e:
+        logger.error(f"Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return 1
 
+def run_gmail_extraction(email_processor, gmail_server, csv_exporter, config):
+    """Run extraction from Gmail"""
+    # Get search keywords and filters from all enabled extractors
+    search_keywords = email_processor.get_search_keywords()
+    search_filters = email_processor.get_search_filters()
+    logger.info(f"Searching for emails with {len(search_keywords)} keywords and {len(search_filters)} filters from all extractors")
+    logger.debug(f"Keywords: {search_keywords[:10]}...")  # Show first 10
+    logger.debug(f"Filters: {search_filters}")
+    
+    # Fetch emails
+    days_back = config['processing']['default_days_back']
+    emails = gmail_server.fetch_emails_for_extractors(search_keywords, search_filters, days_back)
+    logger.info(f"Found {len(emails)} emails to process")
+    
+    if not emails:
+        logger.info("No emails found matching criteria")
+        return 0
+    
+    # Process emails through all extractors
+    all_results = {}
+    processed_count = 0
+    
+    for email in emails:
+        try:
+            email_content = gmail_server.get_email_content(email['id'])
+            email_metadata = {
+                'date': email.get('date', ''),
+                'sender': email.get('sender', ''),
+                'subject': email.get('subject', ''),
+                'id': email['id'],
+                'attachments': email.get('attachments', []),
+                'pdf_processed': email.get('pdf_processed', False),
+                'pdf_filename': email.get('pdf_filename', ''),
+                'pdf_text': email.get('pdf_text', ''),
+                'pdf_text_length': email.get('pdf_text_length', 0),
+                'pdf_processing_error': email.get('pdf_processing_error', '')
+            }
+            
+            results = email_processor.process_email(email_content, email_metadata)
+            
+            # Collect results by extractor type
+            for extractor_name, items in results.items():
+                if extractor_name not in all_results:
+                    all_results[extractor_name] = []
+                all_results[extractor_name].extend(items)
+            
+            processed_count += 1
+            if processed_count % 10 == 0:
+                logger.info(f"Processed {processed_count}/{len(emails)} emails...")
+                
+        except Exception as e:
+            logger.error(f"Error processing email {email['id']}: {e}")
+            continue
+    
+    # Export results for each extractor
+    extractor_output_files = email_processor.get_extractor_output_files()
+    for extractor_name, items in all_results.items():
+        if extractor_name in extractor_output_files:
+            output_file = extractor_output_files[extractor_name]
+            csv_exporter.export_extractor_data(extractor_name, items, output_file)
+    
+    # Summary statistics
+    logger.info("\n=== EXTRACTION SUMMARY ===")
+    total_items = 0
+    for extractor_name, items in all_results.items():
+        count = len(items)
+        total_items += count
+        logger.info(f"📊 {extractor_name.title()}: {count} items extracted")
+    
+    logger.info(f"📈 Total: {total_items} items from {processed_count} emails")
+    
+    # Show sample results for each extractor
+    for extractor_name, items in all_results.items():
+        if items:
+            logger.info(f"\n📄 Sample {extractor_name} data:")
+            sample_item = items[0]
+            for key, value in list(sample_item.items())[:5]:  # Show first 5 fields
+                logger.info(f"   {key}: {str(value)[:50]}...")
+    
+    return 0
+
+def run_dummy_data_test(email_processor, csv_exporter, config):
+    """Run extraction with dummy data for testing"""
+    logger.info("Dummy data testing - creating sample data for enabled extractors")
+    
+    enabled_extractors = email_processor.get_enabled_extractors()
+    dummy_results = {}
+    
+    # Create dummy invoice data if invoices extractor is enabled
+    if 'invoices' in enabled_extractors:
+        dummy_results['invoices'] = [{
+            'email_id': 'dummy_invoice_001',
+            'email_subject': 'Test Invoice from Anthropic',
+            'email_sender': 'billing@anthropic.com',
+            'email_date': '2025-01-15 10:30:00',
+            'vendor': 'Anthropic, PBC',
+            'invoice_number': 'INV-2025-001',
+            'amount': '25.00',
+            'currency': 'USD',
+            'due_date': '2025-02-15',
+            'invoice_date': '2025-01-15',
+            'ocr': '',
+            'description': 'Claude API usage',
+            'confidence': 0.95,
+            'processed_date': '2025-01-15 15:45:00',
+            'pdf_processed': False,
+            'pdf_filename': '',
+            'pdf_text_length': 0,
+            'pdf_processing_error': ''
+        }]
+    
+    # Create dummy concert data if concerts extractor is enabled
+    if 'concerts' in enabled_extractors:
+        dummy_results['concerts'] = [{
+            'artist': 'Test Band',
+            'venue': 'Nalen',
+            'town': 'Stockholm',
+            'date': '2025-03-15',
+            'room': 'Stora Salen',
+            'ticket_info': 'Tickets available at venue',
+            'email_date': '2025-01-15 12:00:00',
+            'source_sender': 'info@nalen.se',
+            'source_subject': 'Upcoming Concert: Test Band at Nalen',
+            'email_id': 'dummy_concert_001',
+            'processed_date': '2025-01-15 15:45:00'
+        }]
+    
+    # Export dummy results
+    extractor_output_files = email_processor.get_extractor_output_files()
+    for extractor_name, items in dummy_results.items():
+        if extractor_name in extractor_output_files:
+            output_file = extractor_output_files[extractor_name]
+            csv_exporter.export_extractor_data(extractor_name, items, output_file)
+    
+    logger.info("✓ Dummy data test completed successfully")
+    return 0
 
 if __name__ == "__main__":
-    main()
+    exit(main())
