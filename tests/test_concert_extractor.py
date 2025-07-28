@@ -159,3 +159,21 @@ class TestConcertExtractor:
         assert result['artist'] == 'Veronica Maggio'
         assert result['venue'] == 'Malmö Arena'
         assert result['town'] == 'Malmö'
+    
+    def test_template_formatting(self, concert_extractor, sample_email_metadata):
+        """Test that the prompt template is properly formatted with variables."""
+        email_content = "Test concert content"
+        
+        # Test the template formatting method
+        formatted_prompt = concert_extractor._format_prompt_template(email_content, sample_email_metadata)
+        
+        # Check that template variables were replaced
+        assert '{email_content}' not in formatted_prompt
+        
+        # Check that email content was included
+        assert 'Test concert content' in formatted_prompt
+        assert sample_email_metadata['subject'] in formatted_prompt
+        
+        # Check that prompt contains expected concert-specific content
+        assert 'concerts in Sweden' in formatted_prompt
+        assert 'JSON array of concerts' in formatted_prompt

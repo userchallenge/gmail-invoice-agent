@@ -80,7 +80,49 @@ def sample_config():
                     'swedish': ['faktura', 'räkning'],
                     'english': ['invoice', 'bill']
                 },
-                'business_domains': ['billing', 'noreply']
+                'business_domains': ['billing', 'noreply'],
+                'prompt_template': '''You are an expert at identifying and extracting data from Swedish and English invoices in emails and PDF attachments.
+
+Analyze this email (including any PDF attachment content) and determine:
+1. Is this a legitimate invoice/bill (not promotional, not receipt, not notification)?
+2. If yes, extract the following information:
+
+Email Content:
+{email_content}
+
+Extract this information if it's an invoice:
+- vendor: Company/organization name
+- invoice_number: Invoice or reference number  
+- amount: Total amount (just the number, no currency)
+- currency: Currency (SEK, USD, EUR, etc.)
+- due_date: Payment due date (YYYY-MM-DD format)
+- invoice_date: Invoice date (YYYY-MM-DD format)
+- ocr: OCR number (Swedish format, typically 16-20 digits)
+- description: Brief description of what this is for
+
+Swedish Invoice Patterns to Look For:
+- Keywords: {swedish_keywords}
+- Currency: kr, SEK, :-
+
+English Invoice Patterns:
+- Keywords: {english_keywords}
+- Currency: $, €, SEK, etc.
+
+Respond with ONLY a JSON object like this:
+{{
+    "is_invoice": true/false,
+    "vendor": "vendor name",
+    "invoice_number": "invoice number",
+    "amount": "amount without currency",
+    "currency": "SEK/USD/EUR",
+    "due_date": "YYYY-MM-DD",
+    "invoice_date": "YYYY-MM-DD", 
+    "ocr": "OCR number if found",
+    "description": "brief description",
+    "confidence": 0.0-1.0
+}}
+
+If not an invoice, respond with: {{"is_invoice": false}}'''
             },
             'concerts': {
                 'enabled': True,
@@ -88,7 +130,27 @@ def sample_config():
                 'keywords': {
                     'swedish': ['konsert', 'live'],
                     'english': ['concert', 'show']
-                }
+                },
+                'prompt_template': '''Extract concert information from this email content for concerts in Sweden.
+
+Email content:
+{email_content}
+
+Extract ALL concerts mentioned in Sweden regardless of venue or city.
+
+Return JSON array of concerts:
+[
+    {{
+        "artist": "main artist/band name",
+        "venue": "venue name (exact name as mentioned)",
+        "town": "city/town where venue is located",
+        "date": "concert date in YYYY-MM-DD format",
+        "room": "specific room if mentioned (Klubben, Stora Salen, etc.)",
+        "ticket_info": "ticket sales information if mentioned"
+    }}
+]
+
+Return empty array [] if no concerts in Sweden found.'''
             }
         },
         'output': {

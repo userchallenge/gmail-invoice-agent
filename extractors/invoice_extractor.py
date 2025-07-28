@@ -44,85 +44,10 @@ class InvoiceExtractor(BaseExtractor):
         return ["has:attachment filename:pdf"]
     
     def extract(self, email_content: str, email_metadata: Dict) -> List[Dict]:
-        """Extract invoice data using Claude AI"""
+        """Extract invoice data using Claude AI with configurable prompt template"""
         try:
-            # Clean and prepare context for Claude (handle encoding issues)
-            subject = self._clean_text(email_metadata.get('subject', ''))
-            sender = self._clean_text(email_metadata.get('sender', ''))
-            body = self._clean_text(email_content)[:2000]  # Limit body length
-            
-            # Include PDF content if available
-            pdf_content = ""
-            if email_metadata.get('pdf_processed') and email_metadata.get('pdf_text'):
-                pdf_text = self._clean_text(email_metadata.get('pdf_text', ''))[:3000]  # Limit PDF text length
-                pdf_filename = email_metadata.get('pdf_filename', 'unknown.pdf')
-                pdf_content = f"""
-
---- PDF ATTACHMENT CONTENT ---
-PDF File: {pdf_filename}
-PDF Text:
-{pdf_text}
---- END PDF CONTENT ---
-"""
-            
-            email_content_formatted = f"""
-Subject: {subject}
-From: {sender}
-Date: {email_metadata.get('date', '')}
-Body: {body}
-
-Attachments: {[self._clean_text(att.get('filename', '')) for att in email_metadata.get('attachments', [])]}
-{pdf_content}
-"""
-            
-            prompt = f"""You are an expert at identifying and extracting data from Swedish and English invoices in emails and PDF attachments.
-
-Analyze this email (including any PDF attachment content) and determine:
-1. Is this a legitimate invoice/bill (not promotional, not receipt, not notification)?
-2. If yes, extract the following information:
-
-Email Content:
-{email_content_formatted}
-
-Extract this information if it's an invoice:
-- vendor: Company/organization name
-- invoice_number: Invoice or reference number  
-- amount: Total amount (just the number, no currency)
-- currency: Currency (SEK, USD, EUR, etc.)
-- due_date: Payment due date (YYYY-MM-DD format)
-- invoice_date: Invoice date (YYYY-MM-DD format)
-- ocr: OCR number (Swedish format, typically 16-20 digits)
-- description: Brief description of what this is for
-
-IMPORTANT: If PDF attachment content is provided (marked with "--- PDF ATTACHMENT CONTENT ---"), 
-prioritize the PDF content over email text as PDFs often contain the actual invoice details.
-
-Swedish Invoice Patterns to Look For:
-- OCR numbers: Long numeric strings (16-20 digits)
-- Keywords: faktura, räkning, förfallodag, att betala, totalt belopp
-- Common vendors: Vattenfall, Telia, ICA, Skatteverket, etc.
-- Currency: kr, SEK, :-
-
-English Invoice Patterns:
-- Keywords: invoice, bill, payment due, total amount
-- Date formats: various international formats
-- Currency: $, €, SEK, etc.
-
-Respond with ONLY a JSON object like this:
-{{
-    "is_invoice": true/false,
-    "vendor": "vendor name",
-    "invoice_number": "invoice number",
-    "amount": "amount without currency",
-    "currency": "SEK/USD/EUR",
-    "due_date": "YYYY-MM-DD",
-    "invoice_date": "YYYY-MM-DD", 
-    "ocr": "OCR number if found",
-    "description": "brief description",
-    "confidence": 0.0-1.0
-}}
-
-If not an invoice, respond with: {{"is_invoice": false}}"""
+            # Use the base class template formatting method
+            prompt = self._format_prompt_template(email_content, email_metadata)
             
             # Use base class method for Claude API call
             response_text = self._call_claude(prompt, max_tokens=1000)
@@ -131,6 +56,10 @@ If not an invoice, respond with: {{"is_invoice": false}}"""
             
             # Parse Claude response using base class method
             extracted_data = self._parse_json_response(response_text, is_array=False)
+            
+            # Ensure extracted_data is a dict (type safety)
+            if not isinstance(extracted_data, dict):
+                extracted_data = {}
             
             if extracted_data and extracted_data.get('is_invoice'):
                 # Add email metadata

@@ -111,11 +111,12 @@ class BaseExtractor(ABC):
             
             # Extract text from Claude's response - handle different response types
             try:
-                if hasattr(response.content[0], 'text'):
-                    response_text = response.content[0].text.strip()
+                content_block = response.content[0]
+                if hasattr(content_block, 'text'):
+                    response_text = content_block.text.strip()
                 else:
-                    # Handle other content types like ToolUseBlock, etc.
-                    response_text = str(response.content[0]).strip()
+                    # Handle other content types by converting to string
+                    response_text = str(content_block).strip()
             except (AttributeError, IndexError):
                 response_text = str(response.content).strip()
             
@@ -213,3 +214,57 @@ class BaseExtractor(ABC):
             })
         
         return extracted_items
+    
+    def _format_prompt_template(self, email_content: str, email_metadata: Dict, **kwargs) -> str:
+        """Format the prompt template with dynamic content"""
+        template = self.config.get('prompt_template', '')
+        if not template:
+            raise ValueError(f"No prompt_template found in config for {self.name} extractor")
+        
+        # Prepare email content with metadata
+        subject = self._clean_text(email_metadata.get('subject', ''))
+        sender = self._clean_text(email_metadata.get('sender', ''))
+        body = self._clean_text(email_content)[:2000]  # Limit body length
+        
+        # Include PDF content if available (for invoice extractor)
+        pdf_content = ""
+        if email_metadata.get('pdf_processed') and email_metadata.get('pdf_text'):
+            pdf_text = self._clean_text(email_metadata.get('pdf_text', ''))[:3000]
+            pdf_filename = email_metadata.get('pdf_filename', 'unknown.pdf')
+            pdf_content = f"""
+
+--- PDF ATTACHMENT CONTENT ---
+PDF File: {pdf_filename}
+PDF Text:
+{pdf_text}
+--- END PDF CONTENT ---
+"""
+        
+        email_content_formatted = f"""
+Subject: {subject}
+From: {sender}
+Date: {email_metadata.get('date', '')}
+Body: {body}
+
+Attachments: {[self._clean_text(att.get('filename', '')) for att in email_metadata.get('attachments', [])]}
+{pdf_content}
+"""
+        
+        # Default template variables
+        template_vars = {
+            'email_content': email_content_formatted,
+            'swedish_keywords': ', '.join(self.config.get('keywords', {}).get('swedish', [])),
+            'english_keywords': ', '.join(self.config.get('keywords', {}).get('english', [])),
+        }
+        
+        # Add any additional variables passed as kwargs
+        template_vars.update(kwargs)
+        
+        try:
+            return template.format(**template_vars)
+        except KeyError as e:
+            logger.error(f"Missing template variable {e} in {self.name} prompt template")
+            raise ValueError(f"Template variable {e} not provided for {self.name} extractor")
+        except Exception as e:
+            logger.error(f"Error formatting prompt template for {self.name}: {e}")
+            raise

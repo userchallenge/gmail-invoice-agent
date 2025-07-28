@@ -33,59 +33,36 @@ class ConcertExtractor(BaseExtractor):
         return []
     
     def extract(self, email_content: str, email_metadata: Dict) -> List[Dict]:
-        """Extract concert data using Claude AI"""
-        # Clean and prepare context for Claude
-        subject = self._clean_text(email_metadata.get('subject', ''))
-        body = self._clean_text(email_content)[:3000]  # Limit body length
-        
-        email_content_formatted = f"""
-Subject: {subject}
-From: {email_metadata.get('sender', '')}
-Date: {email_metadata.get('date', '')}
-Body: {body}
-"""
-        
-        prompt = f"""Extract concert information from this email content for concerts in Sweden.
-
-Email content:
-{email_content_formatted}
-
-Extract ALL concerts mentioned in Sweden regardless of venue or city.
-
-Return JSON array of concerts:
-[
-    {{
-        "artist": "main artist/band name",
-        "venue": "venue name (exact name as mentioned)",
-        "town": "city/town where venue is located",
-        "date": "concert date in YYYY-MM-DD format",
-        "room": "specific room if mentioned (Klubben, Stora Salen, etc.)",
-        "ticket_info": "ticket sales information if mentioned"
-    }}
-]
-
-Return empty array [] if no concerts in Sweden found."""
-        
-        # Use base class method for Claude API call
-        response_text = self._call_claude(prompt, max_tokens=1500)
-        if not response_text:
+        """Extract concert data using Claude AI with configurable prompt template"""
+        try:
+            # Use the base class template formatting method
+            prompt = self._format_prompt_template(email_content, email_metadata)
+            
+            # Use base class method for Claude API call
+            response_text = self._call_claude(prompt, max_tokens=1500)
+            if not response_text:
+                return []
+            
+            # Parse JSON response using base class method
+            concerts = self._parse_json_response(response_text, is_array=True)
+            
+            # Ensure concerts is always a list (type safety)
+            if not isinstance(concerts, list):
+                concerts = []
+            
+            # Log Claude's response for debugging
+            logger.info(f"Claude concert response: {response_text[:300]}...")
+            
+            # Add email metadata using base class method
+            if concerts:
+                concerts = self._add_email_metadata(concerts, email_metadata)
+                subject = self._clean_text(email_metadata.get('subject', ''))
+                logger.info(f"✓ Extracted {len(concerts)} concert(s) from: {subject[:50]}...")
+            
+            return concerts
+            
+        except Exception as e:
+            logger.error(f"Error extracting concert data: {e}")
             return []
-        
-        # Parse JSON response using base class method
-        concerts = self._parse_json_response(response_text, is_array=True)
-        
-        # Ensure concerts is always a list (type safety)
-        if not isinstance(concerts, list):
-            concerts = []
-        
-        # Log Claude's response for debugging
-        logger.info(f"Claude concert response: {response_text[:300]}...")
-        
-        # Add email metadata using base class method
-        if concerts:
-            concerts = self._add_email_metadata(concerts, email_metadata)
-            logger.info(f"✓ Extracted {len(concerts)} concert(s) from: {subject[:50]}...")
-        
-        return concerts
     
     

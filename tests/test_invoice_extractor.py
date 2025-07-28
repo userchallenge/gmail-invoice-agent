@@ -115,3 +115,23 @@ class TestInvoiceExtractor:
         results = invoice_extractor.extract(email_content, sample_email_metadata)
         
         assert len(results) == 0
+    
+    def test_template_formatting(self, invoice_extractor, sample_email_metadata):
+        """Test that the prompt template is properly formatted with variables."""
+        email_content = "Test invoice content"
+        
+        # Test the template formatting method
+        formatted_prompt = invoice_extractor._format_prompt_template(email_content, sample_email_metadata)
+        
+        # Check that template variables were replaced
+        assert '{email_content}' not in formatted_prompt
+        assert '{swedish_keywords}' not in formatted_prompt  
+        assert '{english_keywords}' not in formatted_prompt
+        
+        # Check that keywords were properly inserted
+        assert 'faktura, räkning' in formatted_prompt
+        assert 'invoice, bill' in formatted_prompt
+        
+        # Check that email content was included
+        assert 'Test invoice content' in formatted_prompt
+        assert sample_email_metadata['subject'] in formatted_prompt
