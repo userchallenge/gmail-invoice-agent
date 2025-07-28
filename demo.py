@@ -2,6 +2,7 @@ import argparse
 import yaml
 import os
 import logging
+from typing import Optional
 from dotenv import load_dotenv
 from agents.email_processor import EmailProcessor
 from gmail_server import GmailServer
@@ -9,7 +10,7 @@ from csv_exporter import CSVExporter
 
 logger = logging.getLogger(__name__)
 
-def setup_logging(log_file: str = None):
+def setup_logging(log_file: Optional[str] = None):
     """Setup logging configuration"""
     log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
@@ -30,7 +31,10 @@ def main():
     parser = argparse.ArgumentParser(description='Gmail Multi-Purpose Email Extractor')
     parser.add_argument('--config', default='config/config.yaml', help='Config file path')
     parser.add_argument('--dummy-data', action='store_true', help='Use test data instead of Gmail API')
-    parser.add_argument('--extractors', nargs='+', help='Specific extractors to run (invoices, concerts)', default=None)
+    parser.add_argument('--extractors', nargs='+', 
+                       choices=['invoices', 'concerts', 'all'], 
+                       help='Specific extractors to run: invoices, concerts, or all', 
+                       default=['all'])
     parser.add_argument('--days-back', type=int, help='Number of days back to search', default=None)
     args = parser.parse_args()
     
@@ -52,8 +56,8 @@ def main():
         logger.error("Please create a .env file with: CLAUDE_API_KEY=your_api_key_here")
         return 1
     
-    # Override extractor selection if specified
-    if args.extractors:
+    # Override extractor selection if specified  
+    if 'all' not in args.extractors:
         logger.info(f"Running only specified extractors: {args.extractors}")
         extractors_config = config.get('extractors', {})
         # Disable all extractors first
@@ -65,6 +69,8 @@ def main():
                 extractors_config[name]['enabled'] = True
             else:
                 logger.warning(f"Unknown extractor '{name}' - available: {list(extractors_config.keys())}")
+    else:
+        logger.info("Running all enabled extractors")
     
     # Override days back if specified
     if args.days_back:
@@ -96,7 +102,19 @@ def main():
     if not enabled_extractors:
         logger.error("No extractors enabled! Check your config.yaml")
         return 1
-    logger.info(f"Enabled extractors: {', '.join(enabled_extractors)}")
+    
+    # Show extractor-specific messages
+    extractor_icons = {'invoices': '🧾', 'concerts': '🎵'}
+    for extractor in enabled_extractors:
+        icon = extractor_icons.get(extractor, '📄')
+        if extractor == 'invoices':
+            logger.info(f"{icon} Invoice extraction enabled")
+        elif extractor == 'concerts':
+            logger.info(f"{icon} Concert extraction enabled (all of Sweden)")
+        else:
+            logger.info(f"{icon} {extractor.title()} extraction enabled")
+    
+    logger.info(f"Active extractors: {', '.join(enabled_extractors)}")
     
     try:
         if args.dummy_data:
@@ -112,58 +130,75 @@ def main():
         return 1
 
 def run_gmail_extraction(email_processor, gmail_server, csv_exporter, config):
-    """Run extraction from Gmail"""
-    # Get search keywords and filters from all enabled extractors
-    search_keywords = email_processor.get_search_keywords()
-    search_filters = email_processor.get_search_filters()
-    logger.info(f"Searching for emails with {len(search_keywords)} keywords and {len(search_filters)} filters from all extractors")
-    logger.debug(f"Keywords: {search_keywords[:10]}...")  # Show first 10
-    logger.debug(f"Filters: {search_filters}")
-    
-    # Fetch emails
+    """Run extraction from Gmail - each extractor runs its own search"""
     days_back = config['processing']['default_days_back']
-    emails = gmail_server.fetch_emails_for_extractors(search_keywords, search_filters, days_back)
-    logger.info(f"Found {len(emails)} emails to process")
     
-    if not emails:
-        logger.info("No emails found matching criteria")
-        return 0
-    
-    # Process emails through all extractors
+    # Get enabled extractors and run separate searches for each
+    enabled_extractors = email_processor.get_enabled_extractors()
+    all_emails = {}  # emails per extractor
     all_results = {}
-    processed_count = 0
     
-    for email in emails:
-        try:
-            email_content = gmail_server.get_email_content(email['id'])
-            email_metadata = {
-                'date': email.get('date', ''),
-                'sender': email.get('sender', ''),
-                'subject': email.get('subject', ''),
-                'id': email['id'],
-                'attachments': email.get('attachments', []),
-                'pdf_processed': email.get('pdf_processed', False),
-                'pdf_filename': email.get('pdf_filename', ''),
-                'pdf_text': email.get('pdf_text', ''),
-                'pdf_text_length': email.get('pdf_text_length', 0),
-                'pdf_processing_error': email.get('pdf_processing_error', '')
-            }
-            
-            results = email_processor.process_email(email_content, email_metadata)
-            
-            # Collect results by extractor type
-            for extractor_name, items in results.items():
-                if extractor_name not in all_results:
-                    all_results[extractor_name] = []
-                all_results[extractor_name].extend(items)
-            
-            processed_count += 1
-            if processed_count % 10 == 0:
-                logger.info(f"Processed {processed_count}/{len(emails)} emails...")
-                
-        except Exception as e:
-            logger.error(f"Error processing email {email['id']}: {e}")
+    for extractor_name in enabled_extractors:
+        # Get extractor-specific search criteria
+        extractor = email_processor.get_extractor_by_name(extractor_name)
+        if not extractor:
             continue
+            
+        search_keywords = extractor.get_search_keywords()
+        search_filters = extractor.get_additional_search_filters()
+        
+        logger.info(f"🔍 Searching for {extractor_name} emails with {len(search_keywords)} keywords and {len(search_filters)} filters")
+        logger.debug(f"{extractor_name} keywords: {search_keywords[:5]}...")  # Show first 5
+        
+        # Fetch emails for this specific extractor
+        emails = gmail_server.fetch_emails_for_extractors(search_keywords, search_filters, days_back)
+        all_emails[extractor_name] = emails
+        logger.info(f"📧 Found {len(emails)} {extractor_name} emails")
+    
+    # Process emails for each extractor separately  
+    for extractor_name, emails in all_emails.items():
+        if not emails:
+            logger.info(f"No {extractor_name} emails to process")
+            continue
+            
+        logger.info(f"🔄 Processing {len(emails)} {extractor_name} emails...")
+        extractor_results = []
+        processed_count = 0
+        
+        for email in emails:
+            try:
+                email_content = gmail_server.get_email_content(email['id'])
+                email_metadata = {
+                    'date': email.get('date', ''),
+                    'sender': email.get('sender', ''),
+                    'subject': email.get('subject', ''),
+                    'id': email['id'],
+                    'attachments': email.get('attachments', []),
+                    'pdf_processed': email.get('pdf_processed', False),
+                    'pdf_filename': email.get('pdf_filename', ''),
+                    'pdf_text': email.get('pdf_text', ''),
+                    'pdf_text_length': email.get('pdf_text_length', 0),
+                    'pdf_processing_error': email.get('pdf_processing_error', '')
+                }
+                
+                # Process with specific extractor only
+                extractor = email_processor.get_extractor_by_name(extractor_name)
+                if extractor:
+                    results = extractor.extract(email_content, email_metadata)
+                    extractor_results.extend(results)
+                
+                processed_count += 1
+                if processed_count % 10 == 0:
+                    logger.info(f"Processed {processed_count}/{len(emails)} {extractor_name} emails...")
+                    
+            except Exception as e:
+                logger.error(f"Error processing {extractor_name} email {email['id']}: {e}")
+                continue
+        
+        # Store results for this extractor
+        if extractor_results:
+            all_results[extractor_name] = extractor_results
+            logger.info(f"✅ {extractor_name}: {len(extractor_results)} items extracted")
     
     # Export results for each extractor
     extractor_output_files = email_processor.get_extractor_output_files()
@@ -175,12 +210,14 @@ def run_gmail_extraction(email_processor, gmail_server, csv_exporter, config):
     # Summary statistics
     logger.info("\n=== EXTRACTION SUMMARY ===")
     total_items = 0
+    total_emails_processed = sum(len(emails) for emails in all_emails.values())
+    
     for extractor_name, items in all_results.items():
         count = len(items)
         total_items += count
         logger.info(f"📊 {extractor_name.title()}: {count} items extracted")
     
-    logger.info(f"📈 Total: {total_items} items from {processed_count} emails")
+    logger.info(f"📈 Total: {total_items} items from {total_emails_processed} emails")
     
     # Show sample results for each extractor
     for extractor_name, items in all_results.items():
@@ -193,28 +230,29 @@ def run_gmail_extraction(email_processor, gmail_server, csv_exporter, config):
     return 0
 
 def run_dummy_data_test(email_processor, csv_exporter, config):
-    """Run extraction with dummy data for testing"""
-    logger.info("Dummy data testing - creating sample data for enabled extractors")
+    """Run extraction with dummy data for testing - use pytest for comprehensive testing"""
+    logger.info("Dummy data testing - for full testing use: pytest tests/")
+    logger.info("Creating minimal sample data for enabled extractors")
     
     enabled_extractors = email_processor.get_enabled_extractors()
     dummy_results = {}
     
-    # Create dummy invoice data if invoices extractor is enabled
+    # Create minimal dummy data for quick validation
     if 'invoices' in enabled_extractors:
         dummy_results['invoices'] = [{
-            'email_id': 'dummy_invoice_001',
-            'email_subject': 'Test Invoice from Anthropic',
-            'email_sender': 'billing@anthropic.com',
+            'email_id': 'demo_invoice_001',
+            'email_subject': 'Demo Invoice',
+            'email_sender': 'demo@example.com',
             'email_date': '2025-01-15 10:30:00',
-            'vendor': 'Anthropic, PBC',
-            'invoice_number': 'INV-2025-001',
-            'amount': '25.00',
-            'currency': 'USD',
+            'vendor': 'Demo Company',
+            'invoice_number': 'DEMO-001',
+            'amount': '100.00',
+            'currency': 'SEK',
             'due_date': '2025-02-15',
             'invoice_date': '2025-01-15',
             'ocr': '',
-            'description': 'Claude API usage',
-            'confidence': 0.95,
+            'description': 'Demo invoice',
+            'confidence': 1.0,
             'processed_date': '2025-01-15 15:45:00',
             'pdf_processed': False,
             'pdf_filename': '',
@@ -222,19 +260,18 @@ def run_dummy_data_test(email_processor, csv_exporter, config):
             'pdf_processing_error': ''
         }]
     
-    # Create dummy concert data if concerts extractor is enabled
     if 'concerts' in enabled_extractors:
         dummy_results['concerts'] = [{
-            'artist': 'Test Band',
-            'venue': 'Nalen',
+            'artist': 'Demo Band',
+            'venue': 'Demo Venue',
             'town': 'Stockholm',
             'date': '2025-03-15',
-            'room': 'Stora Salen',
-            'ticket_info': 'Tickets available at venue',
+            'room': 'Main Stage',
+            'ticket_info': 'Demo tickets',
             'email_date': '2025-01-15 12:00:00',
-            'source_sender': 'info@nalen.se',
-            'source_subject': 'Upcoming Concert: Test Band at Nalen',
-            'email_id': 'dummy_concert_001',
+            'source_sender': 'demo@venue.se',
+            'source_subject': 'Demo Concert',
+            'email_id': 'demo_concert_001',
             'processed_date': '2025-01-15 15:45:00'
         }]
     
@@ -245,7 +282,7 @@ def run_dummy_data_test(email_processor, csv_exporter, config):
             output_file = extractor_output_files[extractor_name]
             csv_exporter.export_extractor_data(extractor_name, items, output_file)
     
-    logger.info("✓ Dummy data test completed successfully")
+    logger.info("✓ Demo data generated - run 'pytest tests/' for comprehensive testing")
     return 0
 
 if __name__ == "__main__":

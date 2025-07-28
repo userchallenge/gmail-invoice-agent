@@ -12,7 +12,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 import time
-import PyPDF2
+import pypdf
 
 logger = logging.getLogger(__name__)
 
@@ -368,7 +368,7 @@ class GmailServer:
             try:
                 # Create PDF reader from bytes
                 pdf_stream = io.BytesIO(pdf_bytes)
-                pdf_reader = PyPDF2.PdfReader(pdf_stream)
+                pdf_reader = pypdf.PdfReader(pdf_stream)
 
                 # Check if password protected
                 if pdf_reader.is_encrypted:

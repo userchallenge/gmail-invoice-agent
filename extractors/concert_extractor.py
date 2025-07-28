@@ -74,6 +74,10 @@ Return empty array [] if no concerts in Sweden found."""
         # Parse JSON response using base class method
         concerts = self._parse_json_response(response_text, is_array=True)
         
+        # Ensure concerts is always a list (type safety)
+        if not isinstance(concerts, list):
+            concerts = []
+        
         # Log Claude's response for debugging
         logger.info(f"Claude concert response: {response_text[:300]}...")
         

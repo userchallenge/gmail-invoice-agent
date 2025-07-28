@@ -40,6 +40,13 @@ class EmailProcessor:
         logger.info(f"Initialized {len(extractors)} extractors")
         return extractors
     
+    def get_extractor_by_name(self, name: str):
+        """Get a specific extractor by name"""
+        for extractor in self.extractors:
+            if extractor.name == name:
+                return extractor
+        return None
+    
     def process_email(self, email_content: str, email_metadata: Dict) -> Dict:
         """Process email through all applicable extractors"""
         results = {}
