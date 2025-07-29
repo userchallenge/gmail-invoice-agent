@@ -162,7 +162,7 @@ class CSVExporter:
             return {}
     
     def export_extractor_data(self, extractor_name: str, data_items: List[Dict], output_file: str):
-        """Generic CSV export for any extractor data"""
+        """Generic CSV export for any extractor data with append mode for historical tracking"""
         if not data_items:
             logger.info(f"No {extractor_name} data to export")
             return
@@ -175,19 +175,48 @@ class CSVExporter:
         for item in data_items:
             all_keys.update(item.keys())
         
-        headers = sorted(list(all_keys))
+        # Define column order for better readability
+        if extractor_name == 'invoices':
+            priority_columns = [
+                'email_id', 'email_subject', 'email_sender', 'email_date', 'email_body_preview', 
+                'extracted', 'vendor', 'invoice_number', 'amount', 'currency', 'confidence',
+                'claude_reasoning_before', 'claude_reasoning_after', 'human_evaluation', 'human_feedback',
+                'processing_timestamp'
+            ]
+        elif extractor_name == 'concerts':
+            priority_columns = [
+                'email_id', 'email_subject', 'email_sender', 'email_date', 'email_body_preview',
+                'extracted', 'artist', 'venue', 'town', 'date', 'confidence',
+                'claude_reasoning_before', 'claude_reasoning_after', 'human_evaluation', 'human_feedback', 
+                'processing_timestamp'
+            ]
+        else:
+            priority_columns = []
+        
+        # Order headers: priority columns first, then remaining columns alphabetically
+        remaining_keys = sorted(all_keys - set(priority_columns))
+        headers = [col for col in priority_columns if col in all_keys] + remaining_keys
         
         try:
-            with open(output_file, 'w', newline='', encoding='utf-8-sig') as csvfile:
+            file_exists = os.path.exists(output_file)
+            
+            # Always append to maintain historical data
+            mode = 'a' if file_exists else 'w'
+            
+            with open(output_file, mode, newline='', encoding='utf-8-sig') as csvfile:
                 writer = csv.DictWriter(csvfile, fieldnames=headers)
-                writer.writeheader()
+                
+                # Only write header if file is new
+                if not file_exists:
+                    writer.writeheader()
                 
                 for item in data_items:
                     # Ensure all fields are present, fill with empty string if missing
                     row = {key: item.get(key, '') for key in headers}
                     writer.writerow(row)
             
-            logger.info(f"✓ Exported {len(data_items)} {extractor_name} items to {output_file}")
+            action = "Appended" if file_exists else "Exported"
+            logger.info(f"✓ {action} {len(data_items)} {extractor_name} items to {output_file}")
             
         except Exception as e:
             logger.error(f"Error exporting {extractor_name} data to CSV: {e}")

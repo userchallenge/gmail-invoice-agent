@@ -3,6 +3,7 @@ from typing import Dict, List, Optional
 import anthropic
 import json
 import logging
+import os
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -103,11 +104,15 @@ class BaseExtractor(ABC):
             # Get model from config, fallback to current working model
             model = self.config.get('claude_model', 'claude-3-5-sonnet-20241022')
             
+            logger.debug(f"Making HTTP request to Claude API - Model: {model}, Max tokens: {max_tokens}")
+            
             response = self.claude.messages.create(
                 model=model,
                 max_tokens=max_tokens,
                 messages=[{"role": "user", "content": cleaned_prompt}]
             )
+            
+            logger.debug(f"Claude API response received - Usage: {getattr(response, 'usage', 'N/A')}")
             
             # Extract text from Claude's response - handle different response types
             try:
@@ -126,8 +131,10 @@ class BaseExtractor(ABC):
             logger.error(f"Error calling Claude for {self.name}: {e}")
             return ""
     
-    def _parse_json_response(self, response_text: str, is_array: bool = False) -> Dict | List[Dict]:
-        """Parse Claude's JSON response with robust error handling"""
+    def _parse_json_response(self, response_text: str, is_array: bool = False) -> tuple[Dict | List[Dict], Dict[str, str]]:
+        """Parse Claude's JSON response with robust error handling and extract reasoning"""
+        reasoning_data = {"before": "", "after": ""}
+        
         try:
             # Clean up response (remove any markdown formatting)
             json_text = response_text
@@ -138,67 +145,155 @@ class BaseExtractor(ABC):
             
             # Extract JSON part from response
             if is_array:
-                # Looking for array format
+                # Looking for array format - find properly balanced brackets
                 json_start = json_text.find('[')
-                json_end = json_text.rfind(']') + 1
-                if json_start >= 0 and json_end > json_start:
-                    extracted_json = json_text[json_start:json_end]
+                if json_start >= 0:
+                    bracket_count = 0
+                    json_end = json_start
+                    for i, char in enumerate(json_text[json_start:], json_start):
+                        if char == '[':
+                            bracket_count += 1
+                        elif char == ']':
+                            bracket_count -= 1
+                            if bracket_count == 0:
+                                json_end = i + 1
+                                break
                     
-                    # Log reasoning if there's extra text
-                    self._log_claude_reasoning(response_text, json_start, json_end)
-                    
-                    return json.loads(extracted_json)
+                    if json_end > json_start:
+                        extracted_json = json_text[json_start:json_end]
+                        
+                        # Extract reasoning and log
+                        reasoning_data = self._extract_reasoning(response_text, json_start, json_end)
+                        
+                        try:
+                            parsed_data = json.loads(extracted_json)
+                            logger.debug(f"Claude {self.name} JSON output: {extracted_json}")
+                            return parsed_data, reasoning_data
+                        except json.JSONDecodeError as e:
+                            logger.debug(f"Failed to parse array JSON, trying fallback: {e}")
+                            # Continue to fallback
                     
                 # Fallback: try single object wrapped in array
                 json_start = json_text.find('{')
                 json_end = json_text.rfind('}') + 1
                 if json_start >= 0 and json_end > json_start:
                     extracted_json = json_text[json_start:json_end]
+                    reasoning_data = self._extract_reasoning(response_text, json_start, json_end)
                     single_item = json.loads(extracted_json)
-                    return [single_item] if single_item else []
+                    result = [single_item] if single_item else []
+                    logger.debug(f"Claude {self.name} JSON output: {extracted_json}")
+                    return result, reasoning_data
             else:
                 # Looking for object format
-                if "{" in json_text and "}" in json_text:
-                    start = json_text.find("{")
+                json_start = json_text.find("{")
+                if json_start >= 0:
                     # Find the closing brace by counting braces
                     brace_count = 0
-                    end = start
-                    for i, char in enumerate(json_text[start:], start):
+                    json_end = json_start
+                    for i, char in enumerate(json_text[json_start:], json_start):
                         if char == "{":
                             brace_count += 1
                         elif char == "}":
                             brace_count -= 1
                             if brace_count == 0:
-                                end = i + 1
+                                json_end = i + 1
                                 break
-                    extracted_json = json_text[start:end]
                     
-                    # Log reasoning if there's extra text
-                    self._log_claude_reasoning(response_text, start, end)
-                    
-                    return json.loads(extracted_json)
+                    if json_end > json_start:
+                        extracted_json = json_text[json_start:json_end]
+                        
+                        # Extract reasoning and log
+                        reasoning_data = self._extract_reasoning(response_text, json_start, json_end)
+                        
+                        try:
+                            parsed_data = json.loads(extracted_json)
+                            logger.debug(f"Claude {self.name} JSON output: {extracted_json}")
+                            return parsed_data, reasoning_data
+                        except json.JSONDecodeError as e:
+                            logger.debug(f"Failed to parse object JSON: {e}")
+                            # Fall through to error handling
                 
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse Claude response as JSON for {self.name}: {e}")
-            logger.error(f"Response was: {response_text}")
+            logger.debug(f"Full Claude response: {response_text}")
         except Exception as e:
             logger.error(f"Error parsing Claude response for {self.name}: {e}")
             
-        return [] if is_array else {}
+        return ([] if is_array else {}), reasoning_data
     
-    def _log_claude_reasoning(self, full_response: str, json_start: int, json_end: int):
-        """Log Claude's reasoning text that appears before/after JSON"""
-        # Log reasoning before JSON
+    def _extract_reasoning(self, full_response: str, json_start: int, json_end: int) -> Dict[str, str]:
+        """Extract Claude's reasoning text that appears before/after JSON"""
+        reasoning_data = {"before": "", "after": ""}
+        
+        # Extract reasoning before JSON
         if json_start > 0:
             reasoning_before = full_response[:json_start].strip()
             if reasoning_before:
-                logger.info(f"Claude's {self.name} reasoning (before): {reasoning_before}")
+                reasoning_data["before"] = reasoning_before
+                logger.debug(f"Claude's {self.name} reasoning (before): {reasoning_before}")
         
-        # Log reasoning after JSON
+        # Extract reasoning after JSON
         if json_end < len(full_response):
             reasoning_after = full_response[json_end:].strip()
             if reasoning_after:
-                logger.info(f"Claude's {self.name} reasoning (after): {reasoning_after}")
+                reasoning_data["after"] = reasoning_after
+                logger.debug(f"Claude's {self.name} reasoning (after): {reasoning_after}")
+        
+        return reasoning_data
+    
+    def _save_email_backup(self, email_content: str, email_metadata: Dict) -> str:
+        """Save email content to consolidated processing file"""
+        try:
+            # Create directory structure: emails/
+            backup_dir = 'emails'
+            os.makedirs(backup_dir, exist_ok=True)
+            
+            # Create consolidated filename with timestamp 
+            timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+            backup_filename = f"processing_{timestamp}.txt"
+            backup_path = os.path.join(backup_dir, backup_filename)
+            
+            # Get or create the global file for this processing session
+            if not hasattr(self.__class__, '_current_backup_file') or not self.__class__._current_backup_file:
+                self.__class__._current_backup_file = backup_path
+                # Write header for new session
+                with open(backup_path, 'w', encoding='utf-8') as f:
+                    f.write(f"=== EMAIL PROCESSING SESSION ===\n")
+                    f.write(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    f.write(f"{'='*50}\n\n")
+            
+            # Prepare email content (without PDF info)
+            email_id = email_metadata.get('id', 'unknown')
+            subject = email_metadata.get('subject', '')
+            sender = email_metadata.get('sender', '') 
+            date = email_metadata.get('date', '')
+            attachments = email_metadata.get('attachments', [])
+            
+            email_entry = f"""--- EMAIL {email_id} ---
+Subject: {subject}
+From: {sender}
+Date: {date}
+Processed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+Extractor: {self.name}
+Attachments: {len(attachments)} files
+
+EMAIL BODY:
+{email_content}
+
+{'='*80}
+
+"""
+            
+            # Append to consolidated file
+            with open(self.__class__._current_backup_file, 'a', encoding='utf-8') as f:
+                f.write(email_entry)
+            
+            logger.debug(f"Email appended to backup: {self.__class__._current_backup_file}")
+            return self.__class__._current_backup_file
+            
+        except Exception as e:
+            logger.error(f"Error saving email backup: {e}")
+            return ""
     
     def _add_email_metadata(self, extracted_items: List[Dict], email_metadata: Dict) -> List[Dict]:
         """Add common email metadata to extracted items"""
@@ -221,24 +316,15 @@ class BaseExtractor(ABC):
         if not template:
             raise ValueError(f"No prompt_template found in config for {self.name} extractor")
         
-        # Prepare email content with metadata
+        # Prepare email content with metadata (exclude PDF content)
         subject = self._clean_text(email_metadata.get('subject', ''))
         sender = self._clean_text(email_metadata.get('sender', ''))
-        body = self._clean_text(email_content)[:2000]  # Limit body length
         
-        # Include PDF content if available (for invoice extractor)
-        pdf_content = ""
-        if email_metadata.get('pdf_processed') and email_metadata.get('pdf_text'):
-            pdf_text = self._clean_text(email_metadata.get('pdf_text', ''))[:3000]
-            pdf_filename = email_metadata.get('pdf_filename', 'unknown.pdf')
-            pdf_content = f"""
-
---- PDF ATTACHMENT CONTENT ---
-PDF File: {pdf_filename}
-PDF Text:
-{pdf_text}
---- END PDF CONTENT ---
-"""
+        # Remove PDF content from email body
+        body = self._clean_text(email_content)
+        if "--- PDF CONTENT ---" in body:
+            body = body.split("--- PDF CONTENT ---")[0].strip()
+        body = body[:2000]  # Limit body length
         
         email_content_formatted = f"""
 Subject: {subject}
@@ -247,7 +333,6 @@ Date: {email_metadata.get('date', '')}
 Body: {body}
 
 Attachments: {[self._clean_text(att.get('filename', '')) for att in email_metadata.get('attachments', [])]}
-{pdf_content}
 """
         
         # Default template variables

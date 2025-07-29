@@ -23,6 +23,11 @@ def setup_logging(log_file: Optional[str] = None):
         )
     else:
         logging.basicConfig(level=logging.INFO, format=log_format)
+    
+    # Set httpx to WARNING level to suppress INFO logs - configure all httpx loggers
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpx._client").setLevel(logging.WARNING) 
+    logging.getLogger("httpx._config").setLevel(logging.WARNING)
 
 def main():
     # Load environment variables
@@ -82,6 +87,11 @@ def main():
         setup_logging(config["output"]["log_file"])
     else:
         setup_logging()
+    
+    # Set httpx to WARNING level to suppress INFO logs
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpx._client").setLevel(logging.WARNING)
+    logging.getLogger("httpx._config").setLevel(logging.WARNING)
     
     # Initialize components
     try:
@@ -219,14 +229,6 @@ def run_gmail_extraction(email_processor, gmail_server, csv_exporter, config):
     
     logger.info(f"📈 Total: {total_items} items from {total_emails_processed} emails")
     
-    # Show sample results for each extractor
-    for extractor_name, items in all_results.items():
-        if items:
-            logger.info(f"\n📄 Sample {extractor_name} data:")
-            sample_item = items[0]
-            for key, value in list(sample_item.items())[:5]:  # Show first 5 fields
-                logger.info(f"   {key}: {str(value)[:50]}...")
-    
     return 0
 
 def run_dummy_data_test(email_processor, csv_exporter, config):
@@ -240,10 +242,15 @@ def run_dummy_data_test(email_processor, csv_exporter, config):
     # Create minimal dummy data for quick validation
     if 'invoices' in enabled_extractors:
         dummy_results['invoices'] = [{
+            # Basic email metadata
             'email_id': 'demo_invoice_001',
             'email_subject': 'Demo Invoice',
             'email_sender': 'demo@example.com',
             'email_date': '2025-01-15 10:30:00',
+            'email_backup_path': 'emails/demo_processing.txt',
+            
+            # Extraction results
+            'extracted': True,
             'vendor': 'Demo Company',
             'invoice_number': 'DEMO-001',
             'amount': '100.00',
@@ -253,26 +260,48 @@ def run_dummy_data_test(email_processor, csv_exporter, config):
             'ocr': '',
             'description': 'Demo invoice',
             'confidence': 1.0,
-            'processed_date': '2025-01-15 15:45:00',
-            'pdf_processed': False,
-            'pdf_filename': '',
-            'pdf_text_length': 0,
-            'pdf_processing_error': ''
+            
+            # Reasoning from Claude
+            'claude_reasoning_before': 'Demo reasoning before JSON output',
+            'claude_reasoning_after': 'Demo reasoning after JSON output',
+            
+            # Human evaluation (empty initially)
+            'human_evaluation': '',
+            'human_feedback': '',
+            
+            # Processing metadata
+            'processing_timestamp': '2025-01-15 15:45:00'
         }]
     
     if 'concerts' in enabled_extractors:
         dummy_results['concerts'] = [{
+            # Basic email metadata
+            'email_id': 'demo_concert_001',
+            'email_subject': 'Demo Concert',
+            'email_sender': 'demo@venue.se',
+            'email_date': '2025-01-15 12:00:00',
+            'email_backup_path': 'emails/demo_processing.txt',
+            
+            # Extraction results
+            'extracted': True,
             'artist': 'Demo Band',
             'venue': 'Demo Venue',
             'town': 'Stockholm',
             'date': '2025-03-15',
             'room': 'Main Stage',
             'ticket_info': 'Demo tickets',
-            'email_date': '2025-01-15 12:00:00',
-            'source_sender': 'demo@venue.se',
-            'source_subject': 'Demo Concert',
-            'email_id': 'demo_concert_001',
-            'processed_date': '2025-01-15 15:45:00'
+            'confidence': 0.9,
+            
+            # Reasoning from Claude
+            'claude_reasoning_before': 'Demo reasoning before JSON output',
+            'claude_reasoning_after': 'Demo reasoning after JSON output',
+            
+            # Human evaluation (empty initially)
+            'human_evaluation': '',
+            'human_feedback': '',
+            
+            # Processing metadata
+            'processing_timestamp': '2025-01-15 15:45:00'
         }]
     
     # Export dummy results

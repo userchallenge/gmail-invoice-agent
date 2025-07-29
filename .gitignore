@@ -1,8 +1,9 @@
 # CW
 
 config/
-output/
 *.sqlite
+emails/
+output/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

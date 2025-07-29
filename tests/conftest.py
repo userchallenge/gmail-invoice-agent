@@ -146,7 +146,8 @@ Return JSON array of concerts:
         "town": "city/town where venue is located",
         "date": "concert date in YYYY-MM-DD format",
         "room": "specific room if mentioned (Klubben, Stora Salen, etc.)",
-        "ticket_info": "ticket sales information if mentioned"
+        "ticket_info": "ticket sales information if mentioned",
+        "confidence": 0.0-1.0
     }}
 ]
 

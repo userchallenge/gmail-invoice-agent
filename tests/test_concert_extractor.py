@@ -112,13 +112,17 @@ class TestConcertExtractor:
         
         # Check first concert
         first_concert = results[0]
+        assert first_concert['extracted'] == True
         assert first_concert['artist'] == 'Arctic Monkeys'
         assert first_concert['venue'] == 'Annexet'
         assert first_concert['town'] == 'Stockholm'
         assert first_concert['date'] == '2025-03-15'
+        assert 'claude_reasoning_before' in first_concert
+        assert 'human_evaluation' in first_concert
         
         # Check second concert
         second_concert = results[1]
+        assert second_concert['extracted'] == True
         assert second_concert['artist'] == 'The Hives'
         assert second_concert['venue'] == 'Ullevi'
         assert second_concert['town'] == 'Göteborg'
@@ -133,7 +137,13 @@ class TestConcertExtractor:
         email_content = "This email has no concert information"
         results = concert_extractor.extract(email_content, sample_email_metadata)
         
-        assert len(results) == 0
+        # Should still return 1 record for rejected email
+        assert len(results) == 1
+        result = results[0]
+        assert result['extracted'] == False
+        assert result['artist'] == ''
+        assert 'claude_reasoning_before' in result
+        assert 'human_evaluation' in result
     
     def test_extract_with_single_concert_object(self, concert_extractor, sample_email_metadata, mock_claude_client):
         """Test extraction when Claude returns single object instead of array."""
@@ -156,6 +166,7 @@ class TestConcertExtractor:
         
         assert len(results) == 1
         result = results[0]
+        assert result['extracted'] == True
         assert result['artist'] == 'Veronica Maggio'
         assert result['venue'] == 'Malmö Arena'
         assert result['town'] == 'Malmö'

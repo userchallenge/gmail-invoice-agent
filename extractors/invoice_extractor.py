@@ -44,67 +44,144 @@ class InvoiceExtractor(BaseExtractor):
         return ["has:attachment filename:pdf"]
     
     def extract(self, email_content: str, email_metadata: Dict) -> List[Dict]:
-        """Extract invoice data using Claude AI with configurable prompt template"""
+        """Extract invoice data using Claude AI with configurable prompt template and reasoning capture"""
         try:
+            # Save email backup for reference
+            backup_path = self._save_email_backup(email_content, email_metadata)
+            
             # Use the base class template formatting method
             prompt = self._format_prompt_template(email_content, email_metadata)
             
             # Use base class method for Claude API call
             response_text = self._call_claude(prompt, max_tokens=1000)
             if not response_text:
-                return []
+                # Create record for failed Claude call
+                return [self._create_failed_processing_record(email_content, email_metadata, backup_path, "No response from Claude")]
             
-            # Parse Claude response using base class method
-            extracted_data = self._parse_json_response(response_text, is_array=False)
+            # Parse Claude response and extract reasoning
+            extracted_data, reasoning_data = self._parse_json_response(response_text, is_array=False)
             
             # Ensure extracted_data is a dict (type safety)
             if not isinstance(extracted_data, dict):
                 extracted_data = {}
             
+            # Create comprehensive record for ALL emails (accepted and rejected)
             if extracted_data and extracted_data.get('is_invoice'):
-                # Add email metadata
-                extracted_data.update({
-                    'email_date': email_metadata.get('date', ''),
-                    'sender': email_metadata.get('sender', ''),
-                    'subject': email_metadata.get('subject', ''),
-                    'email_id': email_metadata.get('id', '')
-                })
-                
-                # Format the data for CSV export
-                formatted_data = self._format_invoice_data(extracted_data, email_metadata)
+                # Format accepted invoice data
+                formatted_data = self._format_accepted_invoice_data(extracted_data, email_metadata, reasoning_data, backup_path, email_content)
                 logger.info(f"✓ Extracted invoice from {extracted_data.get('vendor', 'Unknown')}")
                 return [formatted_data]
             else:
+                # Format rejected email data
+                formatted_data = self._format_rejected_invoice_data(extracted_data, email_metadata, reasoning_data, backup_path, email_content)
                 logger.debug(f"Claude determined this is not an invoice: {email_metadata.get('subject', '')}")
-                return []
+                return [formatted_data]
                 
         except Exception as e:
             logger.error(f"Error extracting invoice data: {e}")
-            return []
+            return [self._create_failed_processing_record(email_content, email_metadata, "", f"Processing error: {str(e)}")]
     
     
-    def _format_invoice_data(self, claude_data: Dict, email_metadata: Dict) -> Dict:
-        """Format the extracted data for CSV export"""
+    def _format_accepted_invoice_data(self, claude_data: Dict, email_metadata: Dict, reasoning_data: Dict, backup_path: str, email_content: str) -> Dict:
+        """Format accepted invoice data for CSV export with reasoning and evaluation columns"""
         return {
+            # Basic email metadata
             'email_id': email_metadata.get('id', ''),
             'email_subject': email_metadata.get('subject', ''),
             'email_sender': email_metadata.get('sender', ''),
             'email_date': email_metadata.get('date', ''),
+            'email_backup_path': backup_path,
+            
+            # Extraction results
+            'extracted': True,
             'vendor': (claude_data.get('vendor') or '').strip(),
             'invoice_number': (claude_data.get('invoice_number') or '').strip(),
             'amount': self._clean_amount(claude_data.get('amount', '')),
-            'currency': claude_data.get('currency', 'SEK').upper(),
+            'currency': (claude_data.get('currency') or 'SEK').upper(),
             'due_date': self._clean_date(claude_data.get('due_date', '')),
             'invoice_date': self._clean_date(claude_data.get('invoice_date', '')),
             'ocr': (claude_data.get('ocr') or '').strip(),
             'description': (claude_data.get('description') or '').strip(),
             'confidence': claude_data.get('confidence', 0.0),
-            'processed_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            # PDF processing metadata
-            'pdf_processed': email_metadata.get('pdf_processed', False),
-            'pdf_filename': email_metadata.get('pdf_filename', ''),
-            'pdf_text_length': email_metadata.get('pdf_text_length', 0),
-            'pdf_processing_error': email_metadata.get('pdf_processing_error', '')
+            
+            # Reasoning from Claude
+            'claude_reasoning_before': reasoning_data.get('before', ''),
+            'claude_reasoning_after': reasoning_data.get('after', ''),
+            
+            # Human evaluation (empty initially)
+            'human_evaluation': '',
+            'human_feedback': '',
+            
+            # Processing metadata
+            'processing_timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+    
+    def _format_rejected_invoice_data(self, claude_data: Dict, email_metadata: Dict, reasoning_data: Dict, backup_path: str, email_content: str) -> Dict:
+        """Format rejected email data for CSV export with reasoning"""
+        return {
+            # Basic email metadata
+            'email_id': email_metadata.get('id', ''),
+            'email_subject': email_metadata.get('subject', ''),
+            'email_sender': email_metadata.get('sender', ''),
+            'email_date': email_metadata.get('date', ''),
+            'email_backup_path': backup_path,
+            
+            # Extraction results (empty for rejected)
+            'extracted': False,
+            'vendor': '',
+            'invoice_number': '',
+            'amount': '',
+            'currency': '',
+            'due_date': '',
+            'invoice_date': '',
+            'ocr': '',
+            'description': '',
+            'confidence': claude_data.get('confidence', 0.0) if claude_data else 0.0,
+            
+            # Reasoning from Claude
+            'claude_reasoning_before': reasoning_data.get('before', ''),
+            'claude_reasoning_after': reasoning_data.get('after', ''),
+            
+            # Human evaluation (empty initially)
+            'human_evaluation': '',
+            'human_feedback': '',
+            
+            # Processing metadata
+            'processing_timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+    
+    def _create_failed_processing_record(self, email_content: str, email_metadata: Dict, backup_path: str, error_message: str) -> Dict:
+        """Create record for emails that failed to process"""
+        return {
+            # Basic email metadata
+            'email_id': email_metadata.get('id', ''),
+            'email_subject': email_metadata.get('subject', ''),
+            'email_sender': email_metadata.get('sender', ''),
+            'email_date': email_metadata.get('date', ''),
+            'email_backup_path': backup_path,
+            
+            # Extraction results (empty for failed)
+            'extracted': False,
+            'vendor': '',
+            'invoice_number': '',
+            'amount': '',
+            'currency': '',
+            'due_date': '',
+            'invoice_date': '',
+            'ocr': '',
+            'description': '',
+            'confidence': 0.0,
+            
+            # Reasoning from Claude (error message)
+            'claude_reasoning_before': f"Processing failed: {error_message}",
+            'claude_reasoning_after': '',
+            
+            # Human evaluation (empty initially)
+            'human_evaluation': '',
+            'human_feedback': '',
+            
+            # Processing metadata
+            'processing_timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }
     
     def _clean_amount(self, amount_str: str) -> str:

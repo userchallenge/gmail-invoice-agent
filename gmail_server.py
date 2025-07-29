@@ -321,7 +321,7 @@ class GmailServer:
                 )
                 return None
 
-            logger.info(f"Downloading PDF attachment: {filename} ({size_mb:.1f}MB)")
+            logger.debug(f"Downloading PDF attachment: {filename} ({size_mb:.1f}MB)")
 
             attachment = (
                 self.service.users()
@@ -333,7 +333,7 @@ class GmailServer:
 
             # Decode the attachment data
             file_data = base64.urlsafe_b64decode(attachment["data"])
-            logger.info(f"✓ PDF downloaded: {filename}")
+            logger.debug(f"✓ PDF downloaded: {filename}")
             return file_data
 
         except Exception as e:
@@ -359,7 +359,7 @@ class GmailServer:
             raise TimeoutError("PDF extraction timed out")
 
         try:
-            logger.info(f"Extracting text from PDF: {filename}")
+            logger.debug(f"Extracting text from PDF: {filename}")
 
             # Set timeout
             signal.signal(signal.SIGALRM, timeout_handler)
@@ -405,7 +405,7 @@ class GmailServer:
                 full_text = "\n".join(text_content)
 
                 if full_text.strip():
-                    logger.info(
+                    logger.debug(
                         f"✓ PDF text extracted: {len(full_text)} characters from {filename}"
                     )
                     return full_text

@@ -100,9 +100,16 @@ class TestInvoiceExtractor:
         
         assert len(results) == 1
         result = results[0]
+        assert result['extracted'] == True
         assert result['vendor'] == 'Test Company'
         assert result['amount'] == '100.0'
         assert result['currency'] == 'SEK'
+        assert result['confidence'] == 0.95
+        assert 'claude_reasoning_before' in result
+        assert 'claude_reasoning_after' in result
+        assert 'human_evaluation' in result
+        assert 'human_feedback' in result
+        assert 'processing_timestamp' in result
     
     def test_extract_with_non_invoice(self, invoice_extractor, sample_email_metadata, mock_claude_client):
         """Test extraction when email is not an invoice."""
@@ -114,7 +121,14 @@ class TestInvoiceExtractor:
         email_content = "This is just a regular email"
         results = invoice_extractor.extract(email_content, sample_email_metadata)
         
-        assert len(results) == 0
+        # Should still return 1 record for rejected email
+        assert len(results) == 1
+        result = results[0]
+        assert result['extracted'] == False
+        assert result['vendor'] == ''
+        assert result['amount'] == ''
+        assert 'claude_reasoning_before' in result
+        assert 'human_evaluation' in result
     
     def test_template_formatting(self, invoice_extractor, sample_email_metadata):
         """Test that the prompt template is properly formatted with variables."""
