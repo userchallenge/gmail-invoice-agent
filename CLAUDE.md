@@ -75,3 +75,4 @@ Ensure CLI-functionality only contains working commands
 You are building AI-agents according to atomic agents principles. The data fetching is done from emails and the purpose of the functionality is to support in making management of emails easier and automatic where possible.
 
 - Please build in steps with approval between the steps as described in @zero_inbox_implementation_prompt.md
+- keep notebooks crisp and distinct for easy understanding
