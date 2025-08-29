@@ -41,6 +41,8 @@ def main():
                        help='Specific extractors to run: invoices, concerts, or all', 
                        default=['all'])
     parser.add_argument('--days-back', type=int, help='Number of days back to search', default=None)
+    parser.add_argument('--from-date', type=str, help='Start date (YYYY-MM-DD format)', default=None)
+    parser.add_argument('--to-date', type=str, help='End date (YYYY-MM-DD format)', default=None)
     args = parser.parse_args()
     
     # Load configuration
@@ -77,10 +79,52 @@ def main():
     else:
         logger.info("Running all enabled extractors")
     
+    # Handle date range parameters
+    from datetime import datetime, timedelta
+    
+    # Validate that only one date method is used
+    date_methods = sum([bool(args.days_back), bool(args.from_date), bool(args.to_date)])
+    if date_methods > 1 and args.days_back:
+        logger.error("Cannot use --days-back together with --from-date or --to-date")
+        return 1
+    
     # Override days back if specified
     if args.days_back:
         config['processing']['default_days_back'] = args.days_back
         logger.info(f"Using custom days back: {args.days_back}")
+    
+    # Handle from/to date range
+    if args.from_date or args.to_date:
+        try:
+            # Default to current date if to_date not specified
+            if not args.to_date:
+                args.to_date = datetime.now().strftime('%Y-%m-%d')
+            
+            # Default to 7 days before to_date if from_date not specified
+            if not args.from_date:
+                to_date_obj = datetime.strptime(args.to_date, '%Y-%m-%d')
+                from_date_obj = to_date_obj - timedelta(days=7)
+                args.from_date = from_date_obj.strftime('%Y-%m-%d')
+            
+            # Validate date formats
+            from_date_obj = datetime.strptime(args.from_date, '%Y-%m-%d')
+            to_date_obj = datetime.strptime(args.to_date, '%Y-%m-%d')
+            
+            # Validate date range
+            if from_date_obj > to_date_obj:
+                logger.error("--from-date cannot be after --to-date")
+                return 1
+            
+            # Store in config for gmail_server to use
+            config['processing']['from_date'] = args.from_date
+            config['processing']['to_date'] = args.to_date
+            config['processing']['use_date_range'] = True
+            
+            logger.info(f"Using custom date range: {args.from_date} to {args.to_date}")
+            
+        except ValueError as e:
+            logger.error(f"Invalid date format. Use YYYY-MM-DD format: {e}")
+            return 1
     
     # Setup logging
     if "log_file" in config["output"]:

@@ -70,10 +70,13 @@ class GmailServer:
         logger.info("Gmail authentication successful")
 
     def _build_search_query(
-        self, start_date: datetime, keywords: List[str] = None, additional_filters: List[str] = None
+        self, start_date: datetime, keywords: List[str] = None, additional_filters: List[str] = None, end_date: datetime = None
     ) -> str:
         """Build Gmail search query from provided keywords and filters"""
-        date_filter = f'after:{start_date.strftime("%Y/%m/%d")}'
+        if end_date:
+            date_filter = f'after:{start_date.strftime("%Y/%m/%d")} before:{end_date.strftime("%Y/%m/%d")}'
+        else:
+            date_filter = f'after:{start_date.strftime("%Y/%m/%d")}'
 
         # Build keyword search terms
         keyword_terms = []
@@ -133,12 +136,23 @@ class GmailServer:
     def fetch_emails(self, days_back: int = 30, max_emails: int = 100) -> List[Dict]:
         """Fetch emails from the last N days"""
         try:
-            # Calculate date range
-            end_date = datetime.now()
-            start_date = end_date - timedelta(days=days_back)
-
-            # Build Gmail search query dynamically from config
-            query = self._build_search_query(start_date)
+            # Check if custom date range is provided in config
+            if self.config.get('processing', {}).get('use_date_range', False):
+                from_date_str = self.config['processing']['from_date']
+                to_date_str = self.config['processing']['to_date']
+                
+                start_date = datetime.strptime(from_date_str, '%Y-%m-%d')
+                end_date = datetime.strptime(to_date_str, '%Y-%m-%d') + timedelta(days=1)  # Include the end date
+                
+                # Build Gmail search query with date range
+                query = self._build_search_query(start_date, None, None, end_date)
+            else:
+                # Calculate date range using days_back (original behavior)
+                end_date = datetime.now()
+                start_date = end_date - timedelta(days=days_back)
+                
+                # Build Gmail search query dynamically from config
+                query = self._build_search_query(start_date)
             logger.info(
                 f"Fetching emails with query: {query} (max {max_emails} emails)"
             )
@@ -284,23 +298,35 @@ class GmailServer:
             return ""
 
     def _get_attachment_info(self, payload: Dict) -> List[Dict]:
-        """Get information about email attachments"""
+        """Get information about email attachments, recursively searching nested messages"""
         attachments = []
-
+        self._extract_attachments_recursive(payload, attachments)
+        return attachments
+    
+    def _extract_attachments_recursive(self, payload: Dict, attachments: List[Dict]):
+        """Recursively extract attachments from MIME structure, including forwarded emails"""
+        # Check if this part itself is an attachment
+        filename = payload.get("filename", "")
+        if filename and payload.get("body", {}).get("attachmentId"):
+            attachments.append({
+                "filename": filename,
+                "mimeType": payload.get("mimeType", ""),
+                "size": payload.get("body", {}).get("size", 0),
+                "attachmentId": payload["body"]["attachmentId"],
+            })
+        
+        # Check if this part has nested parts
         if "parts" in payload:
             for part in payload["parts"]:
-                filename = part.get("filename", "")
-                if filename and part["body"].get("attachmentId"):
-                    attachments.append(
-                        {
-                            "filename": filename,
-                            "mimeType": part["mimeType"],
-                            "size": part["body"].get("size", 0),
-                            "attachmentId": part["body"]["attachmentId"],
-                        }
-                    )
-
-        return attachments
+                # Handle nested message/rfc822 (forwarded emails)
+                if part.get("mimeType") == "message/rfc822" and "parts" in part:
+                    logger.debug(f"Found forwarded email, recursively searching for attachments")
+                    # Recursively search the forwarded message
+                    self._extract_attachments_recursive(part, attachments)
+                
+                # Handle regular parts (including nested multipart structures)
+                else:
+                    self._extract_attachments_recursive(part, attachments)
 
     def _download_pdf_attachment(
         self, attachment_id: str, message_id: str, filename: str, size: int
@@ -504,12 +530,23 @@ class GmailServer:
     ) -> List[Dict]:
         """Fetch emails using combined keywords and filters from all extractors"""
         try:
-            # Calculate date range
-            end_date = datetime.now()
-            start_date = end_date - timedelta(days=days_back)
-
-            # Build Gmail search query using provided keywords and filters
-            query = self._build_search_query(start_date, keywords, additional_filters)
+            # Check if custom date range is provided in config
+            if self.config.get('processing', {}).get('use_date_range', False):
+                from_date_str = self.config['processing']['from_date']
+                to_date_str = self.config['processing']['to_date']
+                
+                start_date = datetime.strptime(from_date_str, '%Y-%m-%d')
+                end_date = datetime.strptime(to_date_str, '%Y-%m-%d') + timedelta(days=1)  # Include the end date
+                
+                # Build Gmail search query with date range
+                query = self._build_search_query(start_date, keywords, additional_filters, end_date)
+            else:
+                # Calculate date range using days_back (original behavior)
+                end_date = datetime.now()
+                start_date = end_date - timedelta(days=days_back)
+                
+                # Build Gmail search query using provided keywords and filters
+                query = self._build_search_query(start_date, keywords, additional_filters)
             logger.info(f"Fetching emails with extractor query: {query}")
             logger.info(
                 f"Searching emails from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}"

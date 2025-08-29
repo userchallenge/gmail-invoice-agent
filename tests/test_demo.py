@@ -162,6 +162,106 @@ class TestDemoScript:
         
         assert result == 1  # Should return error code
     
+    @patch.dict('os.environ', {'CLAUDE_API_KEY': 'test-key'})
+    @patch('demo.load_dotenv')
+    @patch('builtins.open')
+    @patch('demo.yaml.safe_load')
+    def test_main_with_date_range(self, mock_yaml_load, mock_open, mock_load_dotenv, mock_components, sample_config):
+        """Test main function with date range parameters."""
+        # Setup mocks
+        mock_yaml_load.return_value = sample_config
+        mock_components['email_processor_instance'].get_enabled_extractors.return_value = ['invoices']
+        
+        # Mock sys.argv with date range
+        test_args = ['demo.py', '--extractors', 'invoices', '--from-date', '2025-06-30', '--to-date', '2025-07-01']
+        
+        with patch('sys.argv', test_args):
+            with patch('sys.stdout', new_callable=StringIO):
+                result = demo.main()
+        
+        assert result == 0
+        # Verify config was updated with date range
+        assert sample_config['processing']['from_date'] == '2025-06-30'
+        assert sample_config['processing']['to_date'] == '2025-07-01'
+        assert sample_config['processing']['use_date_range'] == True
+    
+    @patch.dict('os.environ', {'CLAUDE_API_KEY': 'test-key'})
+    @patch('demo.load_dotenv')
+    @patch('builtins.open')
+    @patch('demo.yaml.safe_load')
+    def test_main_with_invalid_date_format(self, mock_yaml_load, mock_open, mock_load_dotenv, mock_components, sample_config):
+        """Test main function with invalid date format."""
+        # Setup mocks
+        mock_yaml_load.return_value = sample_config
+        
+        # Mock sys.argv with invalid date format
+        test_args = ['demo.py', '--from-date', 'invalid-date']
+        
+        with patch('sys.argv', test_args):
+            with patch('sys.stdout', new_callable=StringIO):
+                result = demo.main()
+        
+        assert result == 1  # Should return error code for invalid date
+    
+    @patch.dict('os.environ', {'CLAUDE_API_KEY': 'test-key'})
+    @patch('demo.load_dotenv')
+    @patch('builtins.open')
+    @patch('demo.yaml.safe_load')
+    def test_main_with_invalid_date_range(self, mock_yaml_load, mock_open, mock_load_dotenv, mock_components, sample_config):
+        """Test main function with from-date after to-date."""
+        # Setup mocks
+        mock_yaml_load.return_value = sample_config
+        
+        # Mock sys.argv with invalid date range (from > to)
+        test_args = ['demo.py', '--from-date', '2025-07-01', '--to-date', '2025-06-30']
+        
+        with patch('sys.argv', test_args):
+            with patch('sys.stdout', new_callable=StringIO):
+                result = demo.main()
+        
+        assert result == 1  # Should return error code for invalid range
+    
+    @patch.dict('os.environ', {'CLAUDE_API_KEY': 'test-key'})
+    @patch('demo.load_dotenv')
+    @patch('builtins.open')
+    @patch('demo.yaml.safe_load')
+    def test_main_mixed_date_parameters(self, mock_yaml_load, mock_open, mock_load_dotenv, mock_components, sample_config):
+        """Test main function with conflicting date parameters."""
+        # Setup mocks
+        mock_yaml_load.return_value = sample_config
+        
+        # Mock sys.argv with conflicting parameters
+        test_args = ['demo.py', '--days-back', '7', '--from-date', '2025-06-30']
+        
+        with patch('sys.argv', test_args):
+            with patch('sys.stdout', new_callable=StringIO):
+                result = demo.main()
+        
+        assert result == 1  # Should return error code for conflicting parameters
+    
+    @patch.dict('os.environ', {'CLAUDE_API_KEY': 'test-key'})
+    @patch('demo.load_dotenv')
+    @patch('builtins.open')
+    @patch('demo.yaml.safe_load')
+    def test_main_with_only_from_date(self, mock_yaml_load, mock_open, mock_load_dotenv, mock_components, sample_config):
+        """Test main function with only from-date (should default to current date for to-date)."""
+        # Setup mocks
+        mock_yaml_load.return_value = sample_config
+        mock_components['email_processor_instance'].get_enabled_extractors.return_value = ['invoices']
+        
+        # Mock sys.argv with only from-date
+        test_args = ['demo.py', '--from-date', '2025-07-10']
+        
+        with patch('sys.argv', test_args):
+            with patch('sys.stdout', new_callable=StringIO):
+                result = demo.main()
+        
+        assert result == 0
+        assert sample_config['processing']['from_date'] == '2025-07-10'
+        # to_date should be set to current date (we don't need to mock datetime for this test)
+        assert 'to_date' in sample_config['processing']
+        assert sample_config['processing']['use_date_range']
+    
     def test_run_dummy_data_test_invoices(self, mock_components, sample_config):
         """Test run_dummy_data_test function with invoices."""
         # Setup mocks

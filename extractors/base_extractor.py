@@ -316,15 +316,12 @@ EMAIL BODY:
         if not template:
             raise ValueError(f"No prompt_template found in config for {self.name} extractor")
         
-        # Prepare email content with metadata (exclude PDF content)
+        # Prepare email content with metadata (include PDF content for analysis)
         subject = self._clean_text(email_metadata.get('subject', ''))
         sender = self._clean_text(email_metadata.get('sender', ''))
         
-        # Remove PDF content from email body
-        body = self._clean_text(email_content)
-        if "--- PDF CONTENT ---" in body:
-            body = body.split("--- PDF CONTENT ---")[0].strip()
-        body = body[:2000]  # Limit body length
+        # Include full email content (with PDF content for analysis)
+        body = self._clean_text(email_content)[:4000]  # Increased limit to accommodate PDF content
         
         email_content_formatted = f"""
 Subject: {subject}
