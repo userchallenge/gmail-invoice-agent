@@ -15,3 +15,6 @@ responses>=0.23.0
 pypdf>=4.0.0
 sqlalchemy>=2.0.0
 html2text
+google-genai
+instructor
+atomic-agents
