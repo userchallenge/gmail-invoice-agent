@@ -592,6 +592,98 @@ class GmailServer:
             logger.error(f"Unexpected error fetching emails: {e}")
             return []
 
+    def fetch_all_emails(self, days_back: int = None, start_date: str = None, end_date: str = None, max_emails: int = None) -> List[Dict]:
+        """
+        Fetch ALL emails without keyword filtering, with flexible date options.
+        
+        Args:
+            days_back: Number of days back from now (default: 7)
+            start_date: Start date in YYYY-MM-DD format
+            end_date: End date in YYYY-MM-DD format  
+            max_emails: Maximum number of emails to fetch (default: from config)
+            
+        Date options (priority order):
+        1. start_date + end_date: Specific date range
+        2. start_date only: From start_date to now
+        3. days_back: Last N days from now (default: 7)
+        """
+        try:
+            # Determine date range
+            if start_date and end_date:
+                # Specific date range
+                start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+                end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+                
+                # Handle single date case - add 1 day to end_date for proper Gmail query
+                if start_date == end_date:
+                    end_dt = end_dt + timedelta(days=1)
+                    date_source = f"single date {start_date}"
+                else:
+                    date_source = f"range {start_date} to {end_date}"
+            elif start_date:
+                # From start date to now
+                start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+                end_dt = datetime.now()
+                date_source = f"from {start_date} to now"
+            else:
+                # Days back (default: 7)
+                days = days_back if days_back is not None else 7
+                end_dt = datetime.now()
+                start_dt = end_dt - timedelta(days=days)
+                date_source = f"last {days} days"
+            
+            # Build inbox-only date query (no keyword filtering)
+            if end_dt > datetime.now():
+                query = f'in:inbox after:{start_dt.strftime("%Y/%m/%d")}'
+            else:
+                query = f'in:inbox after:{start_dt.strftime("%Y/%m/%d")} before:{end_dt.strftime("%Y/%m/%d")}'
+            
+            logger.info(f"Fetching INBOX emails ({date_source}) with query: {query}")
+            logger.info(f"Date range: {start_dt.strftime('%Y-%m-%d')} to {end_dt.strftime('%Y-%m-%d')}")
+            
+            # Get max emails from parameter or config
+            max_results = max_emails if max_emails is not None else self.config.get("processing", {}).get("max_emails", 100)
+            
+            # Get message list
+            results = (
+                self.service.users()
+                .messages()
+                .list(userId="me", q=query, maxResults=max_results)
+                .execute()
+            )
+            
+            messages = results.get("messages", [])
+            logger.info(f"Found {len(messages)} emails (inbox only, no keyword filtering)")
+            
+            emails = []
+            for i, message in enumerate(messages):
+                try:
+                    email_data = self._get_email_details(message["id"])
+                    if email_data:
+                        emails.append(email_data)
+                        logger.debug(f"Processed email {i+1}/{len(messages)}: {email_data['subject'][:50]}...")
+                    
+                    # Rate limiting - be nice to Gmail API
+                    if i > 0 and i % 10 == 0:
+                        time.sleep(1)
+                
+                except Exception as e:
+                    logger.error(f"Error processing message {message['id']}: {e}")
+                    continue
+            
+            logger.info(f"Successfully processed {len(emails)} emails (universal fetch)")
+            return emails
+            
+        except HttpError as error:
+            logger.error(f"Gmail API error: {error}")
+            return []
+        except ValueError as e:
+            logger.error(f"Date parsing error: {e}")
+            return []
+        except Exception as e:
+            logger.error(f"Unexpected error fetching all emails: {e}")
+            return []
+
     def get_email_content(self, email_id: str) -> str:
         """Get combined email content (body + PDF text) for processing"""
         try:
