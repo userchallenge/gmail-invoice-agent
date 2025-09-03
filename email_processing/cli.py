@@ -5,8 +5,10 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import argparse
+import time
 import yaml
 from datetime import datetime
+from dotenv import load_dotenv
 from gmail_server import GmailServer
 from email_processing.database.db_manager import EmailDatabaseManager
 from email_processing.agents.categorization_agent import EmailCategorizationAgent
@@ -113,8 +115,56 @@ def fetch_and_store_emails(days_back: int = None, from_date: str = None, to_date
     return len(emails)
 
 
+def smart_truncate_content(content: str, max_length: int = 1500) -> str:
+    """Smart content truncation preserving beginning and end context."""
+    if len(content) <= max_length:
+        return content
+    
+    # Keep first 1000 chars and last 500 chars for context
+    first_part = content[:1000]
+    last_part = content[-(max_length-1000-20):]  # -20 for separator
+    
+    return f"{first_part}\n...[truncated]...\n{last_part}"
+
+
+def should_include_pdf(body_length: int, pdf_length: int) -> bool:
+    """Decide whether to include PDF content based on body length."""
+    # Skip PDF if body has sufficient content (>500 chars)
+    if body_length > 500:
+        return False
+    # Include PDF if body is minimal but PDF has content
+    return pdf_length > 0
+
+
+def retry_with_backoff(func, *args, max_retries=3, **kwargs):
+    """Retry function with exponential backoff for rate limit errors."""
+    for attempt in range(max_retries):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            error_str = str(e)
+            
+            # Check if it's a rate limit error (429)
+            if "429" in error_str or "rate_limit_error" in error_str.lower():
+                if attempt < max_retries - 1:  # Don't sleep on last attempt
+                    # Parse retry-after from error message if available
+                    wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
+                    print(f"  Rate limit hit, waiting {wait_time}s before retry {attempt + 2}/{max_retries}")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    print(f"  Rate limit: Max retries exceeded")
+                    raise
+            else:
+                # Non-rate limit error, don't retry
+                raise
+    
+    # Should never reach here
+    raise Exception("Retry logic error")
+
+
 def categorize_emails():
-    """Categorize uncategorized emails."""
+    """Categorize uncategorized emails with token reduction and rate limiting."""
     print("Categorizing emails...")
     
     db_manager = EmailDatabaseManager()
@@ -123,29 +173,63 @@ def categorize_emails():
     uncategorized_emails = db_manager.get_uncategorized_emails()
     print(f"Found {len(uncategorized_emails)} uncategorized emails")
     
-    for email in uncategorized_emails:
+    successful_count = 0
+    failed_count = 0
+    
+    for i, email in enumerate(uncategorized_emails, 1):
+        print(f"Processing email {i}/{len(uncategorized_emails)}: {email.subject[:50]}...")
+        
+        # Apply token reduction strategies
+        original_body = email.body_clean or ""
+        original_pdf = email.pdf_text or ""
+        
+        # Smart truncation of body content
+        truncated_body = smart_truncate_content(original_body)
+        
+        # Smart PDF inclusion (skip if body has enough context)
+        include_pdf = should_include_pdf(len(original_body), len(original_pdf))
+        pdf_content = smart_truncate_content(original_pdf, 1000) if include_pdf else ""
+        
         email_data = {
             "email_id": email.email_id,
             "sender": email.sender,
             "subject": email.subject,
-            "body_clean": email.body_clean,
-            "pdf_text": email.pdf_text or ""
+            "body_clean": truncated_body,
+            "pdf_text": pdf_content
         }
         
-        result = categorization_agent.categorize_email(email_data)
+        try:
+            # Use retry with exponential backoff for rate limit errors
+            result = retry_with_backoff(categorization_agent.categorize_email, email_data)
+            
+            db_manager.store_categorization(
+                email_id=email.email_id,
+                category_name=result["category"],
+                agent_name="EmailCategorizationAgent",
+                model_version="claude-3-5-sonnet-20241022",
+                ai_reasoning=result["ai_reasoning"]
+            )
+            
+            print(f"✓ Categorized as: {result['category']}")
+            successful_count += 1
+            
+        except Exception as e:
+            print(f"✗ Error categorizing email: {e}")
+            print(f"  Subject: {email.subject}")
+            print(f"  Sender: {email.sender}")
+            failed_count += 1
+            continue
         
-        db_manager.store_categorization(
-            email_id=email.email_id,
-            category_name=result["category"],
-            agent_name="EmailCategorizationAgent",
-            model_version="claude-3-5-sonnet-20241022",
-            ai_reasoning=result["ai_reasoning"]
-        )
-        
-        print(f"Categorized: {email.subject[:50]}... -> {result['category']}")
+        # Rate limiting: Increased delay to prevent acceleration limits
+        if i < len(uncategorized_emails):  # Don't delay after the last email
+            time.sleep(2.0)  # 2 second delay for gradual ramping
     
-    print(f"Categorized {len(uncategorized_emails)} emails")
-    return len(uncategorized_emails)
+    print(f"\nCategorization complete:")
+    print(f"  ✓ Successful: {successful_count} emails")
+    if failed_count > 0:
+        print(f"  ✗ Failed: {failed_count} emails")
+    
+    return successful_count
 
 
 def summarize_information_emails():
@@ -289,6 +373,9 @@ def run_full_pipeline(days_back: int = None, from_date: str = None, to_date: str
 
 
 def main():
+    # Load environment variables from .env file
+    load_dotenv()
+    
     parser = argparse.ArgumentParser(description="Email Processing Pipeline")
     parser.add_argument(
         "--days", 
