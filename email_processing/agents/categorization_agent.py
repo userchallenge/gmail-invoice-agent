@@ -18,17 +18,18 @@ class EmailCategorizationAgent:
 
         self.system_prompt_generator = SystemPromptGenerator(
             background=[
-                "Categorize emails as 'information' or 'action'.",
+                "Categorize emails as 'information', 'action', or 'job_search'.",
                 "Information: newsletters, ads, updates, general inquiries.",
                 "Action: requests, questions, invoices, tasks, urgent issues.",
+                "Job_search: job offers, position postings, recruiting emails.",
             ],
             steps=[
                 "Read email content.",
-                "Categorize as 'information' or 'action'.",
+                "Categorize as 'information', 'action', or 'job_search'.",
                 "Provide brief reasoning.",
             ],
             output_instructions=[
-                "Set category to 'information' or 'action'.",
+                "Set category to 'information', 'action', or 'job_search'.",
                 "Give short reasoning (1-2 sentences) on the format: Category: <category>. <reasoning>",
             ],
         )

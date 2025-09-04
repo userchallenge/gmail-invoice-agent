@@ -27,7 +27,7 @@ class EmailCategorizationOutputSchema(BaseIOSchema):
     """Output schema containing the categorization result and reasoning from the agent."""
     
     category: str = Field(
-        description="The assigned category: either 'information' or 'action'"
+        description="The assigned category: 'information', 'action', or 'job_search'"
     )
     ai_reasoning: str = Field(
         description="The reasoning behind the categorization decision"

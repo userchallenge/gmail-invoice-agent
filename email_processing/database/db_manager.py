@@ -34,7 +34,8 @@ class EmailDatabaseManager:
         
         categories = [
             Category(name="information"),
-            Category(name="action")
+            Category(name="action"),
+            Category(name="job_search")
         ]
         
         session.add_all(categories)
