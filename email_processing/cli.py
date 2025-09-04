@@ -233,7 +233,7 @@ def categorize_emails():
 
 
 def summarize_information_emails():
-    """Summarize information emails that don't have summaries."""
+    """Summarize information emails with token reduction and rate limiting."""
     print("Summarizing information emails...")
     
     db_manager = EmailDatabaseManager()
@@ -242,30 +242,64 @@ def summarize_information_emails():
     emails_to_summarize = db_manager.get_information_emails_without_summary()
     print(f"Found {len(emails_to_summarize)} information emails to summarize")
     
-    for email in emails_to_summarize:
+    successful_count = 0
+    failed_count = 0
+    
+    for i, email in enumerate(emails_to_summarize, 1):
+        print(f"Processing email {i}/{len(emails_to_summarize)}: {email.subject[:50]}...")
+        
+        # Apply token reduction strategies (same as categorization)
+        original_body = email.body_clean or ""
+        original_pdf = email.pdf_text or ""
+        
+        # Smart truncation of body content
+        truncated_body = smart_truncate_content(original_body)
+        
+        # Smart PDF inclusion (skip if body has enough context)
+        include_pdf = should_include_pdf(len(original_body), len(original_pdf))
+        pdf_content = smart_truncate_content(original_pdf, 1000) if include_pdf else ""
+        
         email_data = {
             "email_id": email.email_id,
             "sender": email.sender,
             "subject": email.subject,
-            "body_clean": email.body_clean,
-            "pdf_text": email.pdf_text or ""
+            "body_clean": truncated_body,
+            "pdf_text": pdf_content
         }
         
-        result = summary_agent.summarize_email(email_data)
+        try:
+            # Use retry with exponential backoff for rate limit errors
+            result = retry_with_backoff(summary_agent.summarize_email, email_data)
+            
+            db_manager.store_summary(
+                email_id=email.email_id,
+                purpose=result["purpose"],
+                value_for_recipient=result["value_for_recipient"],
+                ai_reasoning=result["ai_reasoning"],
+                agent_name="EmailSummaryAgent",
+                model_version="claude-3-5-sonnet-20241022"
+            )
+            
+            print(f"✓ Summarized successfully")
+            successful_count += 1
+            
+        except Exception as e:
+            print(f"✗ Error summarizing email: {e}")
+            print(f"  Subject: {email.subject}")
+            print(f"  Sender: {email.sender}")
+            failed_count += 1
+            continue
         
-        db_manager.store_summary(
-            email_id=email.email_id,
-            purpose=result["purpose"],
-            value_for_recipient=result["value_for_recipient"],
-            ai_reasoning=result["ai_reasoning"],
-            agent_name="EmailSummaryAgent",
-            model_version="gemini-2.0-flash"
-        )
-        
-        print(f"Summarized: {email.subject[:50]}...")
+        # Rate limiting: Same delay as categorization
+        if i < len(emails_to_summarize):  # Don't delay after the last email
+            time.sleep(2.0)  # 2 second delay for gradual ramping
     
-    print(f"Summarized {len(emails_to_summarize)} emails")
-    return len(emails_to_summarize)
+    print(f"\nSummarization complete:")
+    print(f"  ✓ Successful: {successful_count} emails")
+    if failed_count > 0:
+        print(f"  ✗ Failed: {failed_count} emails")
+    
+    return successful_count
 
 
 def show_stats():

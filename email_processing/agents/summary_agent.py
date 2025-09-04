@@ -1,41 +1,32 @@
 import os
-import sys
-
-# Add the root directory to the Python path to import LLMClientFactory
-sys.path.append(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-)
-
+import instructor
+import anthropic
 from atomic_agents import AtomicAgent, AgentConfig
 from atomic_agents.context import SystemPromptGenerator, ChatHistory
-from llm_client_factory import LLMClientFactory
 
 from ..schemas.agent_schemas import EmailSummaryInputSchema, EmailSummaryOutputSchema
 
 
 class EmailSummaryAgent:
     def __init__(self):
-        self.client = LLMClientFactory.create_client(
-            provider="gemini", model="gemini-2.0-flash"
+        self.client = instructor.from_anthropic(
+            anthropic.Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
         )
 
         self.system_prompt_generator = SystemPromptGenerator(
             background=[
-                "You are an email summary agent.",
-                "Your task is to analyze information emails and create concise summaries.",
-                "Focus on the sender's purpose and the value provided to the recipient.",
+                "Summarize information emails concisely.",
+                "Focus on sender's purpose and recipient value.",
             ],
             steps=[
-                "Read the email content including subject, sender, body, and any PDF attachments.",
-                "Identify the sender's purpose - why did they send this email?",
-                "Determine what value this email provides for the recipient.",
-                "Create clear, actionable insights about the email content.",
+                "Read email content.",
+                "Identify sender's purpose.",
+                "Determine recipient value.",
             ],
             output_instructions=[
-                "Purpose should be 1-2 sentences explaining the sender's intent.",
-                "Value for recipient should be 1-2 sentences explaining what the recipient gains.",
-                "Reasoning should explain your analysis approach.",
-                "Keep all responses concise and focused.",
+                "Purpose: sender's intent described as short as possible.",
+                "Value: recipient benefit described as short as possible.",
+                "Reasoning: Why this email is important.",
             ],
         )
 
@@ -48,11 +39,10 @@ class EmailSummaryAgent:
         agent = AtomicAgent[EmailSummaryInputSchema, EmailSummaryOutputSchema](
             config=AgentConfig(
                 client=self.client,
-                model="gemini-2.0-flash",
+                model="claude-3-5-sonnet-20241022",
                 system_prompt_generator=self.system_prompt_generator,
                 history=history,
-                # Gemini doesn't need max_tokens parameter
-                # model_api_parameters={"max_output_tokens": 1000}
+                model_api_parameters={"max_tokens": 1000},
             )
         )
 
