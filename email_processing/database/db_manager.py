@@ -5,7 +5,7 @@ import json
 from datetime import datetime
 from typing import List, Dict, Optional
 
-from ..models.email_models import Base, Email, Category, Categorization, Summary
+from ..models.email_models import Base, Email, Category, Categorization, Summary, Task
 
 
 class EmailDatabaseManager:
@@ -151,6 +151,56 @@ class EmailDatabaseManager:
         session.commit()
         session.close()
     
+    def get_action_emails_without_tasks(self) -> List[Email]:
+        """Get action emails that don't have tasks yet."""
+        session = self.SessionLocal()
+        
+        # Get action category
+        action_category = session.query(Category).filter_by(name="action").first()
+        if not action_category:
+            session.close()
+            return []
+        
+        # Find emails with action category but no tasks
+        emails = session.query(Email).filter(
+            Email.category_id == action_category.category_id,
+            ~Email.tasks.any()
+        ).all()
+        
+        session.close()
+        return emails
+    
+    def store_task(self, email_id: str, action_required: str, assigned_to: str,
+                   due_date: Optional[str], priority: str, ai_reasoning: str, 
+                   agent_name: str, model_version: str) -> None:
+        """Store task result."""
+        session = self.SessionLocal()
+        
+        # Parse due_date if provided and not 'Not specified'
+        parsed_due_date = None
+        if due_date and due_date != "Not specified":
+            try:
+                # Try to parse the date string
+                parsed_due_date = datetime.strptime(due_date, "%Y-%m-%d")
+            except ValueError:
+                # If parsing fails, leave as None
+                pass
+        
+        task = Task(
+            email_id=email_id,
+            agent_name=agent_name,
+            model_version=model_version,
+            action_required=action_required,
+            assigned_to=assigned_to,
+            due_date=parsed_due_date,
+            priority=priority,
+            ai_reasoning=ai_reasoning
+        )
+        
+        session.add(task)
+        session.commit()
+        session.close()
+    
     def get_processing_stats(self) -> Dict:
         """Get processing statistics."""
         session = self.SessionLocal()
@@ -158,13 +208,15 @@ class EmailDatabaseManager:
         total_emails = session.query(Email).count()
         categorized_emails = session.query(Email).filter(Email.category_id.isnot(None)).count()
         summarized_emails = session.query(Summary).count()
+        task_emails = session.query(Task).count()
         
         session.close()
         
         return {
             "total_emails": total_emails,
             "categorized_emails": categorized_emails,
-            "summarized_emails": summarized_emails
+            "summarized_emails": summarized_emails,
+            "task_emails": task_emails
         }
     
     def delete_all_tables(self) -> None:
@@ -172,6 +224,7 @@ class EmailDatabaseManager:
         session = self.SessionLocal()
         
         # Delete all data from tables
+        session.query(Task).delete()
         session.query(Summary).delete()
         session.query(Categorization).delete()
         session.query(Email).delete()
@@ -188,6 +241,7 @@ class EmailDatabaseManager:
         session = self.SessionLocal()
         
         # Delete processing results
+        session.query(Task).delete()
         session.query(Summary).delete()
         session.query(Categorization).delete()
         
@@ -207,9 +261,11 @@ class EmailDatabaseManager:
             session.query(Email).update({Email.category_id: None})
         elif table_name == "summaries":
             session.query(Summary).delete()
+        elif table_name == "tasks":
+            session.query(Task).delete()
         else:
             session.close()
-            raise ValueError(f"Invalid table name: {table_name}. Must be 'categorizations' or 'summaries'")
+            raise ValueError(f"Invalid table name: {table_name}. Must be 'categorizations', 'summaries', or 'tasks'")
         
         session.commit()
         session.close()
@@ -222,7 +278,8 @@ class EmailDatabaseManager:
             "emails": session.query(Email).count(),
             "categories": session.query(Category).count(),
             "categorizations": session.query(Categorization).count(),
-            "summaries": session.query(Summary).count()
+            "summaries": session.query(Summary).count(),
+            "tasks": session.query(Task).count()
         }
         
         session.close()

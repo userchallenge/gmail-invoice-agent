@@ -13,6 +13,7 @@ from gmail_server import GmailServer
 from email_processing.database.db_manager import EmailDatabaseManager
 from email_processing.agents.categorization_agent import EmailCategorizationAgent
 from email_processing.agents.summary_agent import EmailSummaryAgent
+from email_processing.agents.task_agent import EmailTaskAgent
 
 
 def load_config():
@@ -301,6 +302,76 @@ def summarize_information_emails():
     return successful_count
 
 
+def process_action_tasks():
+    """Process action emails to extract tasks with token reduction and rate limiting."""
+    print("Processing action emails for task extraction...")
+    
+    db_manager = EmailDatabaseManager()
+    task_agent = EmailTaskAgent()
+    
+    emails_to_process = db_manager.get_action_emails_without_tasks()
+    print(f"Found {len(emails_to_process)} action emails to process for tasks")
+    
+    successful_count = 0
+    failed_count = 0
+    
+    for i, email in enumerate(emails_to_process, 1):
+        print(f"Processing email {i}/{len(emails_to_process)}: {email.subject[:50]}...")
+        
+        # Apply token reduction strategies (same as categorization)
+        original_body = email.body_clean or ""
+        original_pdf = email.pdf_text or ""
+        
+        # Smart truncation of body content
+        truncated_body = smart_truncate_content(original_body)
+        
+        # Smart PDF inclusion (skip if body has enough context)
+        include_pdf = should_include_pdf(len(original_body), len(original_pdf))
+        pdf_content = smart_truncate_content(original_pdf, 1000) if include_pdf else ""
+        
+        email_data = {
+            "email_id": email.email_id,
+            "sender": email.sender,
+            "subject": email.subject,
+            "body_clean": truncated_body,
+            "pdf_text": pdf_content,
+        }
+        
+        try:
+            # Use retry with exponential backoff for rate limit errors
+            result = retry_with_backoff(task_agent.analyze_task, email_data)
+            
+            db_manager.store_task(
+                email_id=email.email_id,
+                action_required=result["action_required"],
+                assigned_to=result["assigned_to"], 
+                due_date=result["due_date"],
+                priority=result["priority"],
+                ai_reasoning=result["ai_reasoning"],
+                agent_name="EmailTaskAgent",
+                model_version="claude-3-5-sonnet-20241022"
+            )
+            
+            print(f"✓ Task extracted successfully")
+            successful_count += 1
+            
+        except Exception as e:
+            print(f"✗ Error processing task: {str(e)}")
+            failed_count += 1
+            continue
+        
+        # Rate limiting: Same delay as categorization
+        if i < len(emails_to_process):  # Don't delay after the last email
+            time.sleep(2.0)  # 2 second delay for gradual ramping
+    
+    print(f"\nTask processing complete:")
+    print(f"  ✓ Successful: {successful_count} emails")
+    if failed_count > 0:
+        print(f"  ✗ Failed: {failed_count} emails")
+    
+    return successful_count
+
+
 def show_stats():
     """Show processing statistics."""
     db_manager = EmailDatabaseManager()
@@ -398,11 +469,14 @@ def run_full_pipeline(days_back: int = None, from_date: str = None, to_date: str
     # Step 3: Summarize information emails
     summarized_count = summarize_information_emails()
     
-    # Step 4: Show final statistics
+    # Step 4: Process action emails for tasks
+    task_count = process_action_tasks()
+    
+    # Step 5: Show final statistics
     show_stats()
     
     print(f"\nPipeline complete!")
-    print(f"Processed {email_count} emails, categorized {categorized_count}, summarized {summarized_count}")
+    print(f"Processed {email_count} emails, categorized {categorized_count}, summarized {summarized_count}, extracted {task_count} tasks")
 
 
 def main():
@@ -447,6 +521,11 @@ def main():
         help="Only summarize existing information emails"
     )
     parser.add_argument(
+        "--tasks-only", 
+        action="store_true", 
+        help="Only process existing action emails for task extraction"
+    )
+    parser.add_argument(
         "--stats", 
         action="store_true", 
         help="Show processing statistics"
@@ -459,7 +538,7 @@ def main():
     parser.add_argument(
         "--delete-result-tables", 
         action="store_true", 
-        help="Clear categorizations and summaries tables (keep emails)"
+        help="Clear categorizations, summaries, and tasks tables (keep emails)"
     )
     parser.add_argument(
         "--delete-result-table", 
@@ -468,8 +547,8 @@ def main():
     )
     parser.add_argument(
         "--table", 
-        choices=["categorizations", "summaries"],
-        help="Specify table to delete (categorizations or summaries)"
+        choices=["categorizations", "summaries", "tasks"],
+        help="Specify table to delete (categorizations, summaries, or tasks)"
     )
     parser.add_argument(
         "--force", 
@@ -493,6 +572,7 @@ def main():
             print("Error: --delete-result-table requires --table parameter")
             print("Usage: --delete-result-table --table categorizations")
             print("       --delete-result-table --table summaries")
+            print("       --delete-result-table --table tasks")
             return
         delete_specific_table(args.table, force=args.force)
     # Handle processing commands
@@ -502,6 +582,8 @@ def main():
         categorize_emails()
     elif args.summarize_only:
         summarize_information_emails()
+    elif args.tasks_only:
+        process_action_tasks()
     elif args.stats:
         show_stats()
     else:

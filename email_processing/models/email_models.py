@@ -23,6 +23,7 @@ class Email(Base):
     category = relationship("Category", back_populates="emails")
     categorizations = relationship("Categorization", back_populates="email")
     summaries = relationship("Summary", back_populates="email")
+    tasks = relationship("Task", back_populates="email")
 
 
 class Category(Base):
@@ -68,3 +69,24 @@ class Summary(Base):
     
     # Relationships
     email = relationship("Email", back_populates="summaries")
+
+
+class Task(Base):
+    __tablename__ = 'tasks'
+    
+    task_id = Column(Integer, primary_key=True, autoincrement=True)
+    email_id = Column(String, ForeignKey('emails.email_id'), nullable=False)
+    agent_name = Column(String, nullable=False)
+    model_version = Column(String, nullable=False)
+    action_required = Column(Text, nullable=False)
+    assigned_to = Column(String, nullable=True)
+    due_date = Column(DateTime, nullable=True)
+    priority = Column(String, nullable=True)
+    ai_reasoning = Column(Text, nullable=False)
+    generated_at = Column(DateTime, default=datetime.utcnow)
+    is_correct = Column(Boolean, nullable=True)
+    feedback_reasoning = Column(Text, nullable=True)
+    feedback_date = Column(DateTime, nullable=True)
+    
+    # Relationships
+    email = relationship("Email", back_populates="tasks")
