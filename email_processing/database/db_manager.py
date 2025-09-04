@@ -33,8 +33,8 @@ class EmailDatabaseManager:
             return
         
         categories = [
-            Category(name="information", description="Emails that provide information, newsletters, updates"),
-            Category(name="action", description="Emails requiring action from the recipient")
+            Category(name="information"),
+            Category(name="action")
         ]
         
         session.add_all(categories)
@@ -133,7 +133,7 @@ class EmailDatabaseManager:
         session.close()
         return emails
     
-    def store_summary(self, email_id: str, purpose: str, value_for_recipient: str,
+    def store_summary(self, email_id: str, email_summary: str,
                      ai_reasoning: str, agent_name: str, model_version: str) -> None:
         """Store summary result."""
         session = self.SessionLocal()
@@ -142,8 +142,7 @@ class EmailDatabaseManager:
             email_id=email_id,
             agent_name=agent_name,
             model_version=model_version,
-            purpose=purpose,
-            value_for_recipient=value_for_recipient,
+            summary=email_summary,
             ai_reasoning=ai_reasoning
         )
         

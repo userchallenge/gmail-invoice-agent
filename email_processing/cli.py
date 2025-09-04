@@ -273,8 +273,7 @@ def summarize_information_emails():
             
             db_manager.store_summary(
                 email_id=email.email_id,
-                purpose=result["purpose"],
-                value_for_recipient=result["value_for_recipient"],
+                email_summary=result["email_summary"],
                 ai_reasoning=result["ai_reasoning"],
                 agent_name="EmailSummaryAgent",
                 model_version="claude-3-5-sonnet-20241022"

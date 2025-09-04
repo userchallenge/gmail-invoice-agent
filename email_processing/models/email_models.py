@@ -30,7 +30,6 @@ class Category(Base):
     
     category_id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String, unique=True, nullable=False)
-    description = Column(String, nullable=True)
     
     # Relationships
     emails = relationship("Email", back_populates="category")
@@ -60,8 +59,7 @@ class Summary(Base):
     email_id = Column(String, ForeignKey('emails.email_id'), nullable=False)
     agent_name = Column(String, nullable=False)
     model_version = Column(String, nullable=False)
-    purpose = Column(Text, nullable=False)
-    value_for_recipient = Column(Text, nullable=False)
+    summary = Column(Text, nullable=False)
     ai_reasoning = Column(Text, nullable=False)
     generated_at = Column(DateTime, default=datetime.utcnow)
     is_correct = Column(Boolean, nullable=True)

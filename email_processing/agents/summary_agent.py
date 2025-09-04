@@ -15,18 +15,17 @@ class EmailSummaryAgent:
 
         self.system_prompt_generator = SystemPromptGenerator(
             background=[
-                "Summarize information emails concisely.",
-                "Focus on sender's purpose and recipient value.",
+                "Extract key information from emails in concise summaries.",
+                "Focus on factual content: amounts, dates, names, actions.",
             ],
             steps=[
                 "Read email content.",
-                "Identify sender's purpose.",
-                "Determine recipient value.",
+                "Identify key facts and data points.",
+                "Create concise summary with essential information only.",
             ],
             output_instructions=[
-                "Purpose: sender's intent described as short as possible.",
-                "Value: recipient benefit described as short as possible.",
-                "Reasoning: Why this email is important.",
+                "Email Summary: Key facts only - for job emails list all positions, for payments include what/when/amount/payee.",
+                "Reasoning: Brief explanation of what information was extracted.",
             ],
         )
 
@@ -57,7 +56,6 @@ class EmailSummaryAgent:
         response = agent.run(input_schema)
 
         return {
-            "purpose": response.purpose,
-            "value_for_recipient": response.value_for_recipient,
+            "email_summary": response.email_summary,
             "ai_reasoning": response.ai_reasoning,
         }
