@@ -14,6 +14,7 @@ from email_processing.database.db_manager import EmailDatabaseManager
 from email_processing.agents.categorization_agent import EmailCategorizationAgent
 from email_processing.agents.summary_agent import EmailSummaryAgent
 from email_processing.agents.task_agent import EmailTaskAgent
+from email_processing.document_generator import DailySummaryGenerator
 
 
 def load_config():
@@ -341,9 +342,9 @@ def process_action_tasks():
             # Use retry with exponential backoff for rate limit errors
             result = retry_with_backoff(task_agent.analyze_task, email_data)
             
-            # Post-process: If no specific assignee mentioned, use sender email
+            # Post-process: If no specific assignee mentioned, use email recipient
             if result["assigned_to"].lower() in ["recipient", "sender", "user", "you"]:
-                result["assigned_to"] = email_data["sender"]
+                result["assigned_to"] = "email_recipient"
             
             db_manager.store_task(
                 email_id=email.email_id,
@@ -374,6 +375,47 @@ def process_action_tasks():
         print(f"  ✗ Failed: {failed_count} emails")
     
     return successful_count
+
+
+def generate_daily_summary(target_date: str = None):
+    """Generate daily summary document for specified date."""
+    from datetime import date, datetime
+    
+    # Parse target date
+    if target_date:
+        try:
+            parsed_date = datetime.strptime(target_date, "%Y-%m-%d").date()
+        except ValueError:
+            print(f"Error: Invalid date format '{target_date}'. Use YYYY-MM-DD format.")
+            return
+    else:
+        # Default to today
+        parsed_date = date.today()
+    
+    print(f"Generating daily summary for {parsed_date.strftime('%Y-%m-%d')}...")
+    
+    # Initialize database and generator
+    db_manager = EmailDatabaseManager()
+    db_manager.initialize_database()
+    
+    generator = DailySummaryGenerator(db_manager)
+    
+    try:
+        filepath = generator.generate_daily_summary(parsed_date)
+        print(f"✓ Daily summary generated successfully: {filepath}")
+        
+        # Show brief stats
+        actions = generator.get_actions_for_date(parsed_date)
+        jobs = generator.get_job_search_emails_for_date(parsed_date)
+        info = generator.get_information_summaries_for_date(parsed_date)
+        
+        print(f"Summary includes:")
+        print(f"  - {len(actions)} action items")
+        print(f"  - {len(jobs)} job opportunities") 
+        print(f"  - {len(info)} information summaries")
+        
+    except Exception as e:
+        print(f"✗ Error generating summary: {str(e)}")
 
 
 def show_stats():
@@ -530,6 +572,16 @@ def main():
         help="Only process existing action emails for task extraction"
     )
     parser.add_argument(
+        "--generate-summary", 
+        action="store_true", 
+        help="Generate daily summary document"
+    )
+    parser.add_argument(
+        "--summary-date", 
+        type=str, 
+        help="Date for summary generation (YYYY-MM-DD format, defaults to today)"
+    )
+    parser.add_argument(
         "--stats", 
         action="store_true", 
         help="Show processing statistics"
@@ -588,6 +640,8 @@ def main():
         summarize_information_emails()
     elif args.tasks_only:
         process_action_tasks()
+    elif args.generate_summary:
+        generate_daily_summary(args.summary_date)
     elif args.stats:
         show_stats()
     else:
