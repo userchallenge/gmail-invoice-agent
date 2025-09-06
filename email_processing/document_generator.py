@@ -4,6 +4,7 @@ from typing import List, Dict, Optional
 from sqlalchemy import and_
 from .database.db_manager import EmailDatabaseManager
 from .models.email_models import Email, Task, Summary, Category
+from .agents.content_formatter_agent import ContentFormatterAgent
 
 
 class DailySummaryGenerator:
@@ -38,7 +39,7 @@ class DailySummaryGenerator:
         info_summaries = self.get_information_summaries_for_date(target_date)
         
         # Build document
-        content = f"# Daily Email Summary - {date_str}\n\n"
+        content = f"# Email & Newsletter Summary - {date_str}\n\n"
         
         # Actions section
         content += self._generate_actions_section(actions)
@@ -230,27 +231,34 @@ class DailySummaryGenerator:
         return content
     
     def _generate_information_section(self, summaries: List[Dict]) -> str:
-        """Generate the information section as a newsletter-style summary."""
+        """Generate professionally formatted information section using AI agent."""
         if not summaries:
-            return "## Information\n*No information emails found for this date.*\n\n"
+            return "*No information emails found for this date.*\n\n"
         
-        content = "## Information\n"
-        
-        # Aggregate summaries into newsletter format
-        newsletter_content = []
+        # Prepare data for ContentFormatterAgent
+        summaries_data = []
         for summary in summaries:
-            # Extract key information and create concise entries
-            summary_text = summary['summary']
-            if summary_text:
-                newsletter_content.append(summary_text)
+            summaries_data.append({
+                'summary': summary['summary'],
+                'sender': summary['sender'],
+                'subject': summary['subject'],
+                'email_date': summary['email_date'].strftime('%Y-%m-%d')
+            })
         
-        if newsletter_content:
-            # Join summaries with proper formatting
-            content += " ".join(newsletter_content) + "\n\n"
-        else:
-            content += "*No detailed summaries available for information emails.*\n\n"
-        
-        return content
+        # Use ContentFormatterAgent to format professionally
+        formatter = ContentFormatterAgent()
+        try:
+            formatted_content = formatter.format_content(summaries_data)
+            # Add the Information heading since agent doesn't include it
+            return "## Information\n\n" + formatted_content + "\n\n"
+        except Exception as e:
+            # Fallback to basic format if agent fails
+            content = "## Information\n\n"
+            for summary in summaries:
+                if summary['summary']:
+                    content += f"- {summary['summary']}\n"
+            content += "\n"
+            return content
     
     def _extract_company_from_sender(self, sender: str) -> str:
         """Extract company name from sender email address."""

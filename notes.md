@@ -152,3 +152,4 @@ python -m email_processing.cli --categorize-only
 # Quick stats check
 python -m email_processing.cli --stats
 ```
+

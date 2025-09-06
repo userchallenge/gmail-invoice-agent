@@ -117,3 +117,25 @@ class EmailTaskOutputSchema(BaseIOSchema):
     def _validate_description(cls):
         # Skip validation for this specific case
         pass
+
+
+class ContentFormatterInputSchema(BaseIOSchema):
+    """Input schema containing email summaries for professional content formatting."""
+    
+    summaries: list = Field(
+        description="List of email summaries with metadata for categorization and formatting"
+    )
+
+
+class ContentFormatterOutputSchema(BaseIOSchema):
+    """Output schema containing professionally formatted and categorized content."""
+    
+    formatted_content: str = Field(
+        description="Professionally formatted content organized into logical categories"
+    )
+    
+    # Override the validation to prevent the dynamic model issue
+    @classmethod
+    def _validate_description(cls):
+        # Skip validation for this specific case
+        pass
