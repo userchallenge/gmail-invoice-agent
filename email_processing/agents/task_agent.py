@@ -27,7 +27,7 @@ class EmailTaskAgent:
             ],
             output_instructions=[
                 "Action Required: Specific actionable task (e.g., 'Pay invoice #12345', 'Schedule meeting with client').",
-                "Assigned To: Who should handle this ('recipient', 'finance team', specific role).",
+                "Assigned To: Who should handle this - if no specific person/team mentioned, use 'recipient'.",
                 "Due Date: Extract date or estimate based on context, 'Not specified' if unclear.",
                 "Priority: Low/Medium/High based on urgency words, deadlines, sender authority.",
                 "Reasoning: Why these task details were identified.",

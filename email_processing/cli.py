@@ -341,6 +341,10 @@ def process_action_tasks():
             # Use retry with exponential backoff for rate limit errors
             result = retry_with_backoff(task_agent.analyze_task, email_data)
             
+            # Post-process: If no specific assignee mentioned, use sender email
+            if result["assigned_to"].lower() in ["recipient", "sender", "user", "you"]:
+                result["assigned_to"] = email_data["sender"]
+            
             db_manager.store_task(
                 email_id=email.email_id,
                 action_required=result["action_required"],
